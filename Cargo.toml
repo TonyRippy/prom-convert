@@ -20,5 +20,6 @@ opentelemetry_sdk = { version = "0.21.2", features = ["metrics", "rt-tokio"] }
 tokio = {version="1", features=["macros", "net", "rt", "signal", "time"]}
 
 [build-dependencies]
+npm_rs = "1"
 
 [dev-dependencies]

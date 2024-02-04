@@ -57,9 +57,9 @@ struct Args {
     output: String,
 }
 
-// TODO: Build inspection UI
-// const INDEX_HTML: &str = include_str!("../ui/dist/index.html");
-// const INDEX_JS: &str = include_str!("../ui/dist/js/index.min.js");
+const UI_HTML: &str = include_str!("../ui/dist/index.html");
+const UI_CSS: &str = include_str!("../ui/dist/css/index.min.css");
+const UI_JS: &str = include_str!("../ui/dist/js/index.min.js");
 
 struct Svc {
     // client_config: ClientConfig,
@@ -85,13 +85,15 @@ impl Service<Request<IncomingBody>> for Svc {
             "/" => Response::builder()
                 .header("Content-Type", "text/html; charset=utf-8")
                 .status(StatusCode::OK)
-                .body("Hello!".into()),
-            // .body(INDEX_HTML.into()),
+                .body(UI_HTML.into()),
+            "/css" => Response::builder()
+                .header("Content-Type", "text/css; charset=utf-8")
+                .status(StatusCode::OK)
+                .body(UI_CSS.into()),
             "/js" => Response::builder()
                 .header("Content-Type", "text/javascript; charset=utf-8")
                 .status(StatusCode::OK)
-                .body("".into()),
-            // .body(INDEX_JS.into()),
+                .body(UI_JS.into()),
             "/-/healthy" => Response::builder().status(StatusCode::OK).body("OK".into()),
             "/-/ready" => Response::builder().status(StatusCode::OK).body("OK".into()),
             // "/-/reload" => Response::builder()
