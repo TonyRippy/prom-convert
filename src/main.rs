@@ -27,6 +27,9 @@ use hyper::{server::conn::http1, StatusCode};
 use hyper::{Request, Uri};
 use hyper_util::rt::TokioIo;
 use opentelemetry::global;
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry_sdk::metrics::MeterProvider;
+use prometheus::{Encoder, TextEncoder};
 use std::future::Future;
 use std::io::{Error, Read};
 use std::pin::Pin;
@@ -63,17 +66,11 @@ const UI_HTML: &str = include_str!("../ui/dist/index.html");
 const UI_CSS: &str = include_str!("../ui/dist/css/index.min.css");
 const UI_JS: &str = include_str!("../ui/dist/js/index.min.js");
 
-struct Svc {
-    // client_config: ClientConfig,
-}
+struct Svc {}
 
 impl Svc {
     fn new() -> Self {
-        Self {
-          // client_config: ClientConfig {
-          //     prometheus_urls: vec!["http://localhost:9090".to_string()],
-          // },
-      }
+        Self {}
     }
 }
 
@@ -96,6 +93,16 @@ impl Service<Request<Incoming>> for Svc {
                 .header("Content-Type", "text/javascript; charset=utf-8")
                 .status(StatusCode::OK)
                 .body(UI_JS.into()),
+            "/metrics" => {
+                let encoder = TextEncoder::new();
+                let metric_families = prometheus::gather();
+                let mut buffer = vec![];
+                encoder.encode(&metric_families, &mut buffer).unwrap();
+                Response::builder()
+                    .header("Content-Type", encoder.format_type())
+                    .status(StatusCode::OK)
+                    .body(buffer.into())
+            }
             "/-/healthy" => Response::builder().status(StatusCode::OK).body("OK".into()),
             "/-/ready" => Response::builder().status(StatusCode::OK).body("OK".into()),
             // "/-/reload" => Response::builder()
@@ -202,6 +209,15 @@ fn main() -> ExitCode {
 
     // Initialize OTel Metrics
     // TODO
+
+    // configure OpenTelemetry to use this registry
+    let exporter = opentelemetry_prometheus::exporter()
+        .with_registry(prometheus::default_registry().clone())
+        .build()
+        .unwrap();
+    // set up a meter meter to create instruments
+    let provider = MeterProvider::builder().with_reader(exporter).build();
+    let meter = provider.meter("my-app");
     debug!("metrics configured");
 
     // Initialize OTel Tracing

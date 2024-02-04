@@ -16,7 +16,9 @@ hyper = { version = "1.0", features = ["client", "server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 log = "0.4"
 opentelemetry = { version = "0.21.0", features = ["metrics"] }
+opentelemetry-prometheus = "0.14.1"
 opentelemetry_sdk = { version = "0.21.2", features = ["metrics", "rt-tokio"] }
+prometheus = { version = "0.13.3", features = ["process"] }
 tokio = {version="1", features=["macros", "net", "rt", "signal", "time"]}
 
 [build-dependencies]
