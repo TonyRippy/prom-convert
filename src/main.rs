@@ -17,21 +17,23 @@
 #[macro_use]
 extern crate log;
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use clap::Parser;
 use env_logger::Env;
-use http_body_util::Full;
+use http_body_util::{BodyExt, Empty, Full};
 use hyper::service::Service;
-use hyper::{body::Incoming as IncomingBody, Request, Response};
+use hyper::{body::Incoming, Response};
 use hyper::{server::conn::http1, StatusCode};
+use hyper::{Request, Uri};
 use hyper_util::rt::TokioIo;
 use opentelemetry::global;
 use std::future::Future;
-use std::io::Error;
+use std::io::{Error, Read};
 use std::pin::Pin;
 use std::process::ExitCode;
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio::net::TcpStream;
 use tokio::runtime;
 use tokio::signal;
 use tokio::task;
@@ -75,12 +77,12 @@ impl Svc {
     }
 }
 
-impl Service<Request<IncomingBody>> for Svc {
+impl Service<Request<Incoming>> for Svc {
     type Response = Response<Full<Bytes>>;
     type Error = hyper::http::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    fn call(&self, req: Request<IncomingBody>) -> Self::Future {
+    fn call(&self, req: Request<Incoming>) -> Self::Future {
         let res = match req.uri().path() {
             "/" => Response::builder()
                 .header("Content-Type", "text/html; charset=utf-8")
@@ -110,6 +112,57 @@ impl Service<Request<IncomingBody>> for Svc {
     }
 }
 
+type FetchResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+async fn fetch(url: String) -> FetchResult<String> {
+    debug!("starting fetch of {}", url);
+    let url = url.parse::<Uri>()?;
+
+    let authority = url.authority().unwrap();
+    let host = authority.host();
+    let port = authority.port_u16().unwrap_or(80);
+
+    let stream = TcpStream::connect((host, port)).await?;
+    let io = TokioIo::new(stream);
+
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
+    tokio::task::spawn(async move {
+        if let Err(err) = conn.await {
+            error!("Connection failed: {:?}", err);
+        }
+    });
+    let path = url.path();
+    let req = Request::builder()
+        .uri(path)
+        .header(hyper::header::HOST, authority.as_str())
+        .body(Empty::<Bytes>::new())?;
+
+    let res = sender.send_request(req).await?;
+
+    // TODO: This needs real error handling
+    debug!("Response: {}", res.status());
+    debug!("Headers: {:#?}\n", res.headers());
+
+    // TODO: Verify that this decodes string output correctly.
+    // This might only work for UTF-8 ecoded data.
+    let mut output = String::new();
+    let buf = res.collect().await.unwrap().aggregate();
+    buf.reader().read_to_string(&mut output)?;
+
+    Ok(output)
+}
+
+async fn sample_metrics(url: String) {
+    match fetch(url).await {
+        Ok(result) => {
+            debug!("fetch result: {}", result);
+        }
+        Err(err) => {
+            error!("fetch error: {}", err);
+        }
+    }
+}
+
 async fn monitoring_loop(args: &Args) -> Result<(), Error> {
     let listener = TcpListener::bind((args.host.as_str(), args.port)).await?;
     info!("Listening on {}:{}", args.host.as_str(), &args.port);
@@ -124,7 +177,8 @@ async fn monitoring_loop(args: &Args) -> Result<(), Error> {
                 break
             }
             _ = sample_interval.tick() => {
-              info!("Sampling metrics");
+              debug!("scheduling sample");
+              tokio::spawn(sample_metrics(args.target.to_string()));
             }
             Ok((tcp_stream, _)) = listener.accept() => {
               tokio::spawn(
