@@ -52,8 +52,8 @@ struct Args {
     #[arg(short, long, default_value_t = 5)]
     interval: u64,
 
-    /// The network address of a Prometheus client to scrape.
-    target: String,
+    /// The URL of the Prometheus client endpoint to scrape.
+    target: Uri,
 
     /// The path to the SQLite database file to store metrics.
     output: String,
@@ -114,10 +114,8 @@ impl Service<Request<Incoming>> for Svc {
 
 type FetchResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-async fn fetch(url: String) -> FetchResult<String> {
+async fn fetch(url: Uri) -> FetchResult<String> {
     debug!("starting fetch of {}", url);
-    let url = url.parse::<Uri>()?;
-
     let authority = url.authority().unwrap();
     let host = authority.host();
     let port = authority.port_u16().unwrap_or(80);
@@ -152,7 +150,7 @@ async fn fetch(url: String) -> FetchResult<String> {
     Ok(output)
 }
 
-async fn sample_metrics(url: String) {
+async fn sample_metrics(url: Uri) {
     match fetch(url).await {
         Ok(result) => {
             debug!("fetch result: {}", result);
@@ -178,7 +176,7 @@ async fn monitoring_loop(args: &Args) -> Result<(), Error> {
             }
             _ = sample_interval.tick() => {
               debug!("scheduling sample");
-              tokio::spawn(sample_metrics(args.target.to_string()));
+              tokio::spawn(sample_metrics(args.target.clone()));
             }
             Ok((tcp_stream, _)) = listener.accept() => {
               tokio::spawn(
