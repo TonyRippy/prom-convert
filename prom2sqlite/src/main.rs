@@ -17,11 +17,10 @@
 #[macro_use]
 extern crate log;
 
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 use clap::Parser;
 use env_logger::Env;
-use fetch::{fetch, parse};
-use http_body_util::{BodyExt, Empty, Full};
+use http_body_util::Full;
 use hyper::service::Service;
 use hyper::{body::Incoming, Response};
 use hyper::{server::conn::http1, StatusCode};
@@ -32,7 +31,7 @@ use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_sdk::metrics::MeterProvider;
 use prometheus::{Encoder, TextEncoder};
 use std::future::Future;
-use std::io::{Error, Read};
+use std::io::Error;
 use std::pin::Pin;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -41,6 +40,8 @@ use tokio::runtime;
 use tokio::signal;
 use tokio::task;
 use tokio::time::MissedTickBehavior;
+
+use fetch::{fetch, parse};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
