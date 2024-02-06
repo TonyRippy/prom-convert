@@ -20,6 +20,7 @@ extern crate log;
 use bytes::{Buf, Bytes};
 use clap::Parser;
 use env_logger::Env;
+use fetch::{fetch, parse};
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::service::Service;
 use hyper::{body::Incoming, Response};
@@ -36,13 +37,10 @@ use std::pin::Pin;
 use std::process::ExitCode;
 use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio::net::TcpStream;
 use tokio::runtime;
 use tokio::signal;
 use tokio::task;
 use tokio::time::MissedTickBehavior;
-
-mod exposition;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -121,49 +119,10 @@ impl Service<Request<Incoming>> for Svc {
     }
 }
 
-type FetchResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-async fn fetch(url: Uri) -> FetchResult<String> {
-    debug!("starting fetch of {}", url);
-    let authority = url.authority().unwrap();
-    let host = authority.host();
-    let port = authority.port_u16().unwrap_or(80);
-
-    let stream = TcpStream::connect((host, port)).await?;
-    let io = TokioIo::new(stream);
-
-    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
-    tokio::task::spawn(async move {
-        if let Err(err) = conn.await {
-            error!("Connection failed: {:?}", err);
-        }
-    });
-    let path = url.path();
-    let req = Request::builder()
-        .uri(path)
-        .header(hyper::header::HOST, authority.as_str())
-        .body(Empty::<Bytes>::new())?;
-
-    let res = sender.send_request(req).await?;
-
-    // TODO: This needs real error handling
-    debug!("Response: {}", res.status());
-    debug!("Headers: {:#?}\n", res.headers());
-    // TODO: parse the Date header and use that as the timestamp for the samples?
-
-    // TODO: Verify that this decodes string output correctly.
-    // This might only work for UTF-8 ecoded data.
-    let mut output = String::new();
-    let buf = res.collect().await.unwrap().aggregate();
-    buf.reader().read_to_string(&mut output)?;
-
-    Ok(output)
-}
-
 async fn sample_metrics(url: Uri) {
     match fetch(url).await {
         Ok(result) => {
-            if let Some(families) = exposition::parse(&result) {
+            if let Some(families) = parse(&result) {
                 for family in families {
                     debug!("family: {:?}", family);
                 }
