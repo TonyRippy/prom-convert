@@ -62,9 +62,7 @@ struct Args {
     output: String,
 }
 
-const UI_HTML: &str = include_str!("../ui/dist/index.html");
-const UI_CSS: &str = include_str!("../ui/dist/css/index.min.css");
-const UI_JS: &str = include_str!("../ui/dist/js/index.min.js");
+const INDEX_HTML: &str = include_str!("./index.html");
 
 struct Svc {}
 
@@ -84,15 +82,7 @@ impl Service<Request<Incoming>> for Svc {
             "/" => Response::builder()
                 .header("Content-Type", "text/html; charset=utf-8")
                 .status(StatusCode::OK)
-                .body(UI_HTML.into()),
-            "/css" => Response::builder()
-                .header("Content-Type", "text/css; charset=utf-8")
-                .status(StatusCode::OK)
-                .body(UI_CSS.into()),
-            "/js" => Response::builder()
-                .header("Content-Type", "text/javascript; charset=utf-8")
-                .status(StatusCode::OK)
-                .body(UI_JS.into()),
+                .body(INDEX_HTML.into()),
             "/metrics" => {
                 let encoder = TextEncoder::new();
                 let metric_families = prometheus::gather();
