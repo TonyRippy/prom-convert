@@ -1,0 +1,29 @@
+[package]
+name = "prom2sqlite"
+description = "Collects data from Prometheus clients and stores it locally in SQLite."
+authors = ["Tony Rippy"]
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytes = "1.5"
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11.1"
+http-body-util = "0.1"
+hyper = { version = "1.0", features = ["client", "server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+log = "0.4"
+opentelemetry = { version = "0.21.0", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.21.2", features = ["metrics", "rt-tokio"] }
+opentelemetry-prometheus = "0.14.1"
+pest = "2.7.7"
+pest_derive = "2.7.7"
+prometheus = { version = "0.13.3", features = ["process"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "signal", "time"] }
+
+[build-dependencies]
+npm_rs = "1"
+
+[dev-dependencies]
