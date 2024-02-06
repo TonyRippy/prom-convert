@@ -284,6 +284,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "fetch"
+version = "0.0.0"
+dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "log",
+ "pest",
+ "pest_derive",
+ "prometheus",
+ "tokio",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -807,6 +822,7 @@ dependencies = [
  "bytes",
  "clap",
  "env_logger",
+ "fetch",
  "http-body-util",
  "hyper",
  "hyper-util",
