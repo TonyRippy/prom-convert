@@ -42,6 +42,8 @@ use tokio::signal;
 use tokio::task;
 use tokio::time::MissedTickBehavior;
 
+mod exposition;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -147,6 +149,7 @@ async fn fetch(url: Uri) -> FetchResult<String> {
     // TODO: This needs real error handling
     debug!("Response: {}", res.status());
     debug!("Headers: {:#?}\n", res.headers());
+    // TODO: parse the Date header and use that as the timestamp for the samples?
 
     // TODO: Verify that this decodes string output correctly.
     // This might only work for UTF-8 ecoded data.
@@ -160,7 +163,11 @@ async fn fetch(url: Uri) -> FetchResult<String> {
 async fn sample_metrics(url: Uri) {
     match fetch(url).await {
         Ok(result) => {
-            debug!("fetch result: {}", result);
+            if let Some(families) = exposition::parse(&result) {
+                for family in families {
+                    debug!("family: {:?}", family);
+                }
+            }
         }
         Err(err) => {
             error!("fetch error: {}", err);
@@ -217,7 +224,7 @@ fn main() -> ExitCode {
         .unwrap();
     // set up a meter meter to create instruments
     let provider = MeterProvider::builder().with_reader(exporter).build();
-    let meter = provider.meter("my-app");
+    let meter = provider.meter("prom2sqlite");
     debug!("metrics configured");
 
     // Initialize OTel Tracing
