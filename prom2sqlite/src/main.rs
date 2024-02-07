@@ -17,6 +17,12 @@
 #[macro_use]
 extern crate log;
 
+use std::future::Future;
+use std::io::{Error, Read};
+use std::pin::Pin;
+use std::process::ExitCode;
+use std::time::Duration;
+
 use bytes::Bytes;
 use clap::Parser;
 use env_logger::Env;
@@ -30,18 +36,15 @@ use opentelemetry::global;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_sdk::metrics::MeterProvider;
 use prometheus::{Encoder, TextEncoder};
-use std::future::Future;
-use std::io::Error;
-use std::pin::Pin;
-use std::process::ExitCode;
-use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::runtime;
 use tokio::signal;
 use tokio::task;
 use tokio::time::MissedTickBehavior;
 
-use fetch::{fetch, parse};
+use fetch::{fetch, parse, MetricFamily};
+
+const INDEX_HTML: &str = include_str!("./index.html");
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -56,14 +59,14 @@ struct Args {
     #[arg(short, long, default_value_t = 5)]
     interval: u64,
 
-    /// The URL of the Prometheus client endpoint to scrape.
-    target: Uri,
+    /// The URL of a Prometheus client endpoint to scrape.
+    /// If "-", then read from stdin.
+    source: String,
 
     /// The path to the SQLite database file to store metrics.
-    output: String,
+    target: String,
 }
 
-const INDEX_HTML: &str = include_str!("./index.html");
 
 struct Svc {}
 
@@ -110,22 +113,20 @@ impl Service<Request<Incoming>> for Svc {
     }
 }
 
-async fn sample_metrics(url: Uri) {
+async fn poll<F>(url: Uri, process: &'static F)
+where
+    F: Fn(&str) -> bool,
+{
     match fetch(url).await {
-        Ok(result) => {
-            if let Some(families) = parse(&result) {
-                for family in families {
-                    debug!("family: {:?}", family);
-                }
-            }
-        }
-        Err(err) => {
-            error!("fetch error: {}", err);
-        }
+        Ok(result) => { _ = process(&result); }
+        Err(err) => error!("fetch error: {}", err)
     }
 }
 
-async fn monitoring_loop(args: &Args) -> Result<(), Error> {
+async fn polling_loop<F>(args: &Args, source: Uri, target: &'static F) -> Result<(), Error>
+where
+    F: Fn(&str) -> bool + Send + Sync,
+{
     let listener = TcpListener::bind((args.host.as_str(), args.port)).await?;
     info!("Listening on {}:{}", args.host.as_str(), &args.port);
 
@@ -140,7 +141,7 @@ async fn monitoring_loop(args: &Args) -> Result<(), Error> {
             }
             _ = sample_interval.tick() => {
               debug!("scheduling sample");
-              tokio::spawn(sample_metrics(args.target.clone()));
+              tokio::spawn(poll(source.clone(), target));
             }
             Ok((tcp_stream, _)) = listener.accept() => {
               tokio::spawn(
@@ -153,6 +154,34 @@ async fn monitoring_loop(args: &Args) -> Result<(), Error> {
         task::yield_now().await;
     }
     Ok(())
+}
+
+fn read_from_stdin<F>(target: &F) -> ExitCode
+where
+    F: Fn(&str) -> bool,
+{
+    let mut input = String::new();
+    if let Err(err) = std::io::stdin().read_to_string(&mut input) {
+        error!("error reading from stdin: {}", err);
+        return ExitCode::FAILURE;
+    }
+    if target(&input) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+fn log_families(input: &str) -> bool {
+    match parse(input) {
+        Some(families) => {
+            for family in families {
+                debug!("family: {:?}", family);
+            }
+            true
+        }
+        None => false,
+    }
 }
 
 fn main() -> ExitCode {
@@ -181,17 +210,26 @@ fn main() -> ExitCode {
     // TODO
     debug!("tracing configured");
 
-    let exit_code = match runtime::Builder::new_current_thread()
-        .enable_time()
-        .enable_io()
-        .build()
-        .and_then(|rt| rt.block_on(monitoring_loop(&args)))
-    {
-        Err(err) => {
-            error!("{}", err);
-            ExitCode::FAILURE
-        }
-        _ => ExitCode::SUCCESS,
+    let exit_code = match args.source.as_str() {
+        "-" => read_from_stdin(&log_families),
+        uri => match uri.parse() {
+            Err(err) => {
+                error!("invalid URL {}: {}", uri, err);
+                ExitCode::FAILURE
+            }
+            Ok(uri) => match runtime::Builder::new_current_thread()
+                .enable_time()
+                .enable_io()
+                .build()
+                .and_then(|rt| rt.block_on(polling_loop(&args, uri, &log_families)))
+            {
+                Err(err) => {
+                    error!("{}", err);
+                    ExitCode::FAILURE
+                }
+                _ => ExitCode::SUCCESS,
+            },
+        },
     };
 
     // Shutdown OTel pipelines
