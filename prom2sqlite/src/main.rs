@@ -59,7 +59,7 @@ struct Args {
     #[arg(short, long, default_value_t = 8080)]
     port: u16,
 
-    /// How often metrics will be collected, in seconds.
+    /// How often metrics will be scraped, in seconds.
     #[arg(short, long, default_value_t = 5)]
     interval: u64,
 
