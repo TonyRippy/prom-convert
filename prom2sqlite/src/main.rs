@@ -39,6 +39,7 @@ use prometheus::{Encoder, TextEncoder};
 use tokio::net::TcpListener;
 use tokio::runtime;
 use tokio::signal;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 use tokio::time::MissedTickBehavior;
 
@@ -61,6 +62,10 @@ struct Args {
     /// How often metrics will be collected, in seconds.
     #[arg(short, long, default_value_t = 5)]
     interval: u64,
+
+    // How many scrapes to hold in memory before dropping samples.
+    #[arg(short, long, default_value_t = 5)]
+    buffer: usize,
 
     /// The URL of a Prometheus client endpoint to scrape.
     /// If "-", then read from stdin.
@@ -109,16 +114,18 @@ impl Service<Request<Incoming>> for Svc {
     }
 }
 
-async fn poll(url: Uri, writer: &mut TableWriter) {
+async fn poll(url: Uri, tx: Sender<(u64, String)>) {
     match fetch(url).await {
-        Ok((timestamp_millis, exposition)) => {
-            writer.write(timestamp_millis, &exposition);
+        Ok(value) => {
+            if let Err(err) = tx.try_send(value) {
+                error!("unable to send sample: {}", err);
+            }
         }
         Err(err) => error!("unable to collect sample: {}", err),
     }
 }
 
-async fn polling_loop(host: String, port: u16, interval: u64, url: Uri, mut writer: TableWriter) {
+async fn polling_loop(host: String, port: u16, interval: u64, url: Uri, tx: Sender<(u64, String)>) {
     let listener = match TcpListener::bind((host.as_str(), port)).await {
         Ok(listener) => listener,
         Err(err) => {
@@ -139,7 +146,7 @@ async fn polling_loop(host: String, port: u16, interval: u64, url: Uri, mut writ
             }
             _ = sample_interval.tick() => {
               debug!("scheduling sample");
-              poll(url.clone(), &mut writer).await;
+              poll(url.clone(), tx.clone()).await;
             }
             Ok((tcp_stream, _)) = listener.accept() => {
               tokio::spawn(
@@ -153,7 +160,7 @@ async fn polling_loop(host: String, port: u16, interval: u64, url: Uri, mut writ
     }
 }
 
-fn read_from_stdin(mut writer: TableWriter) -> ExitCode {
+fn read_from_stdin(tx: Sender<(u64, String)>) -> ExitCode {
     let mut input = String::new();
     if let Err(err) = std::io::stdin().read_to_string(&mut input) {
         error!("error reading from stdin: {}", err);
@@ -163,13 +170,32 @@ fn read_from_stdin(mut writer: TableWriter) -> ExitCode {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
-    if !writer.write(timestamp, &input) {
+    if let Err(err) = tx.try_send((timestamp, input)) {
+        error!("unable to send sample: {}", err);
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
 }
 
+async fn writer_loop(mut rx: Receiver<(u64, String)>, mut writer: TableWriter) {
+    debug!("writer started");
+    loop {
+        match rx.recv().await {
+            Some((timestamp_millis, exposition)) => {
+                debug!("processing sample");
+                writer.write(timestamp_millis, &exposition);
+            }
+            None => {
+                info!("no more samples to process");
+                break;
+            }
+        }
+    }
+}
+
 async fn run(args: Args) -> Result<ExitCode, Error> {
+    let (tx, rx) = channel::<(u64, String)>(args.buffer);
+
     let writer = match TableWriter::open(&args.target) {
         Ok(writer) => writer,
         Err(err) => {
@@ -177,21 +203,27 @@ async fn run(args: Args) -> Result<ExitCode, Error> {
             return Ok(ExitCode::FAILURE);
         }
     };
+    let writer_task = tokio::spawn(writer_loop(rx, writer));
 
-    Ok(match args.source.as_str() {
-        "-" => read_from_stdin(writer),
+    let exit_code = match args.source.as_str() {
+        "-" => read_from_stdin(tx),
         uri => match uri.parse() {
             Ok(uri) => {
                 debug!("starting polling loop");
-                polling_loop(args.host, args.port, args.interval, uri, writer).await;
+                polling_loop(args.host, args.port, args.interval, uri, tx).await;
                 ExitCode::SUCCESS
             }
             Err(err) => {
+                drop(tx);
                 error!("invalid URL {}: {}", uri, err);
                 ExitCode::FAILURE
             }
         },
-    })
+    };
+    debug!("waiting for writer task to complete");
+    writer_task.await?;
+    debug!("done");
+    Ok(exit_code)
 }
 
 fn main() -> ExitCode {
