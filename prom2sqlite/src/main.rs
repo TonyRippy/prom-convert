@@ -21,7 +21,7 @@ use std::future::Future;
 use std::io::{Error, Read};
 use std::pin::Pin;
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use clap::Parser;
@@ -42,7 +42,10 @@ use tokio::signal;
 use tokio::task;
 use tokio::time::MissedTickBehavior;
 
-use fetch::{fetch, parse, MetricFamily};
+use fetch::fetch;
+
+mod table;
+use table::TableWriter;
 
 const INDEX_HTML: &str = include_str!("./index.html");
 
@@ -67,14 +70,7 @@ struct Args {
     target: String,
 }
 
-
 struct Svc {}
-
-impl Svc {
-    fn new() -> Self {
-        Self {}
-    }
-}
 
 impl Service<Request<Incoming>> for Svc {
     type Response = Response<Full<Bytes>>;
@@ -113,24 +109,26 @@ impl Service<Request<Incoming>> for Svc {
     }
 }
 
-async fn poll<F>(url: Uri, process: &'static F)
-where
-    F: Fn(&str) -> bool,
-{
+async fn poll(url: Uri, writer: &mut TableWriter) {
     match fetch(url).await {
-        Ok(result) => { _ = process(&result); }
-        Err(err) => error!("fetch error: {}", err)
+        Ok((timestamp_millis, exposition)) => {
+            writer.write(timestamp_millis, &exposition);
+        }
+        Err(err) => error!("unable to collect sample: {}", err),
     }
 }
 
-async fn polling_loop<F>(args: &Args, source: Uri, target: &'static F) -> Result<(), Error>
-where
-    F: Fn(&str) -> bool + Send + Sync,
-{
-    let listener = TcpListener::bind((args.host.as_str(), args.port)).await?;
-    info!("Listening on {}:{}", args.host.as_str(), &args.port);
+async fn polling_loop(host: String, port: u16, interval: u64, url: Uri, mut writer: TableWriter) {
+    let listener = match TcpListener::bind((host.as_str(), port)).await {
+        Ok(listener) => listener,
+        Err(err) => {
+            error!("error binding to {}:{}: {}", host.as_str(), port, err);
+            return;
+        }
+    };
+    info!("listening on {}:{}", host.as_str(), port);
 
-    let mut sample_interval = tokio::time::interval(Duration::from_secs(args.interval));
+    let mut sample_interval = tokio::time::interval(Duration::from_secs(interval));
     sample_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
@@ -141,47 +139,59 @@ where
             }
             _ = sample_interval.tick() => {
               debug!("scheduling sample");
-              tokio::spawn(poll(source.clone(), target));
+              poll(url.clone(), &mut writer).await;
             }
             Ok((tcp_stream, _)) = listener.accept() => {
               tokio::spawn(
                   http1::Builder::new()
                       .keep_alive(false)
-                      .serve_connection(TokioIo::new(tcp_stream), Svc::new()));
+                      .serve_connection(TokioIo::new(tcp_stream), Svc{}));
           }
 
         }
         task::yield_now().await;
     }
-    Ok(())
 }
 
-fn read_from_stdin<F>(target: &F) -> ExitCode
-where
-    F: Fn(&str) -> bool,
-{
+fn read_from_stdin(mut writer: TableWriter) -> ExitCode {
     let mut input = String::new();
     if let Err(err) = std::io::stdin().read_to_string(&mut input) {
         error!("error reading from stdin: {}", err);
         return ExitCode::FAILURE;
     }
-    if target(&input) {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    if !writer.write(timestamp, &input) {
+        return ExitCode::FAILURE;
     }
+    ExitCode::SUCCESS
 }
 
-fn log_families(input: &str) -> bool {
-    match parse(input) {
-        Some(families) => {
-            for family in families {
-                debug!("family: {:?}", family);
-            }
-            true
+async fn run(args: Args) -> Result<ExitCode, Error> {
+    let writer = match TableWriter::open(&args.target) {
+        Ok(writer) => writer,
+        Err(err) => {
+            error!("error opening database: {}", err);
+            return Ok(ExitCode::FAILURE);
         }
-        None => false,
-    }
+    };
+
+    Ok(match args.source.as_str() {
+        "-" => read_from_stdin(writer),
+        uri => match uri.parse() {
+            Ok(uri) => {
+                debug!("starting polling loop");
+                polling_loop(args.host, args.port, args.interval, uri, writer).await;
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                error!("invalid URL {}: {}", uri, err);
+                ExitCode::FAILURE
+            }
+        },
+    })
 }
 
 fn main() -> ExitCode {
@@ -210,26 +220,17 @@ fn main() -> ExitCode {
     // TODO
     debug!("tracing configured");
 
-    let exit_code = match args.source.as_str() {
-        "-" => read_from_stdin(&log_families),
-        uri => match uri.parse() {
-            Err(err) => {
-                error!("invalid URL {}: {}", uri, err);
-                ExitCode::FAILURE
-            }
-            Ok(uri) => match runtime::Builder::new_current_thread()
-                .enable_time()
-                .enable_io()
-                .build()
-                .and_then(|rt| rt.block_on(polling_loop(&args, uri, &log_families)))
-            {
-                Err(err) => {
-                    error!("{}", err);
-                    ExitCode::FAILURE
-                }
-                _ => ExitCode::SUCCESS,
-            },
-        },
+    let exit_code = match runtime::Builder::new_current_thread()
+        .enable_time()
+        .enable_io()
+        .build()
+        .and_then(|rt| rt.block_on(run(args)))
+    {
+        Ok(exit_code) => exit_code,
+        Err(err) => {
+            error!("error running application thead: {}", err);
+            ExitCode::FAILURE
+        }
     };
 
     // Shutdown OTel pipelines

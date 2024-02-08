@@ -23,6 +23,7 @@ pest = "2.7.7"
 pest_derive = "2.7.7"
 prometheus = { version = "0.13.3", features = ["process"] }
 tokio = { version = "1", features = ["macros", "net", "rt", "signal", "time"] }
+sqlite = "0.33.0"
 
 [build-dependencies]
 npm_rs = "1"

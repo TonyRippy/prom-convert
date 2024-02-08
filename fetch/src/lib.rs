@@ -20,6 +20,7 @@ extern crate log;
 use std::io::Read;
 
 use bytes::{Buf, Bytes};
+use chrono::{DateTime, Utc};
 use http_body_util::{BodyExt, Empty};
 use hyper::{Request, Uri};
 use hyper_util::rt::TokioIo;
@@ -197,7 +198,7 @@ pub fn parse(input: &str) -> Option<Vec<MetricFamily>> {
 
 pub type FetchResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-pub async fn fetch(url: Uri) -> FetchResult<String> {
+pub async fn fetch(url: Uri) -> FetchResult<(u64, String)> {
     debug!("starting fetch of {}", url);
     let authority = url.authority().unwrap();
     let host = authority.host();
@@ -223,6 +224,14 @@ pub async fn fetch(url: Uri) -> FetchResult<String> {
     // TODO: This needs real error handling
     debug!("Response: {}", res.status());
     debug!("Headers: {:#?}\n", res.headers());
+    let timestamp = match res.headers().get(hyper::header::DATE) {
+        Some(date) => {
+            let date = date.to_str().unwrap();
+            let date = DateTime::parse_from_rfc2822(date).unwrap();
+            date.timestamp_millis()
+        }
+        None => Utc::now().timestamp_millis(),
+    };
     // TODO: parse the Date header and use that as the timestamp for the samples?
 
     // TODO: Verify that this decodes string output correctly.
@@ -231,5 +240,5 @@ pub async fn fetch(url: Uri) -> FetchResult<String> {
     let buf = res.collect().await.unwrap().aggregate();
     buf.reader().read_to_string(&mut output)?;
 
-    Ok(output)
+    Ok((timestamp as u64, output))
 }
