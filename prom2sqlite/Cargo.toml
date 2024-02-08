@@ -19,6 +19,7 @@ log = "0.4"
 opentelemetry = { version = "0.21.0", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.21.2", features = ["metrics", "rt-tokio"] }
 opentelemetry-prometheus = "0.14.1"
+parse = { path = "../parse" }
 pest = "2.7.7"
 pest_derive = "2.7.7"
 prometheus = { version = "0.13.3", features = ["process"] }

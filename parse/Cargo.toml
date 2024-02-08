@@ -1,0 +1,11 @@
+[package]
+name = "parse"
+description = "Parse data out of the Prometheus exposition format."
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4"
+pest = "2.7.7"
+pest_derive = "2.7.7"

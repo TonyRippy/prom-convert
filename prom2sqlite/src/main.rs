@@ -114,11 +114,12 @@ impl Service<Request<Incoming>> for Svc {
 }
 
 async fn collect(url: Uri, tx: Sender<(u64, String)>) {
-  debug!("collecting sample");
-  match fetch(url).await {
-        Ok(value) => {
-            if let Err(err) = tx.try_send(value) {
-                error!("unable to send sample: {}", err);
+    debug!("collecting sample");
+    match fetch(url).await {
+        Ok((timestamp_millis, exposition)) => {
+            debug!("collected sample {}", timestamp_millis);
+            if let Err(err) = tx.try_send((timestamp_millis, exposition)) {
+                error!("unable to send sample {}: {}", timestamp_millis, err);
             }
         }
         Err(err) => error!("unable to collect sample: {}", err),
@@ -180,7 +181,7 @@ async fn writer_loop(mut rx: Receiver<(u64, String)>, mut writer: TableWriter) {
     loop {
         match rx.recv().await {
             Some((timestamp_millis, exposition)) => {
-                debug!("processing sample");
+                debug!("processing sample {}", timestamp_millis);
                 writer.write(timestamp_millis, &exposition);
                 debug!("processing done");
             }

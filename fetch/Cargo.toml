@@ -12,11 +12,8 @@ http-body-util = "0.1"
 hyper = { version = "1.0", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 log = "0.4"
-pest = "2.7.7"
-pest_derive = "2.7.7"
 prometheus = "0.13.3"
 tokio = { version = "1", features = ["net"] }
-# ["macros", "net", "rt", "signal", "time"]
 
 [build-dependencies]
 

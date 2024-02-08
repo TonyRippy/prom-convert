@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use fetch::{parse, MetricFamily};
+use parse::{parse, MetricFamily};
 use std::collections::HashMap;
 
 #[derive(PartialEq, Debug)]
