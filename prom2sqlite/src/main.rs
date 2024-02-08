@@ -40,7 +40,6 @@ use tokio::net::TcpListener;
 use tokio::runtime;
 use tokio::signal;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::task;
 use tokio::time::MissedTickBehavior;
 
 use fetch::fetch;
