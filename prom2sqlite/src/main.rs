@@ -114,8 +114,9 @@ impl Service<Request<Incoming>> for Svc {
     }
 }
 
-async fn poll(url: Uri, tx: Sender<(u64, String)>) {
-    match fetch(url).await {
+async fn collect(url: Uri, tx: Sender<(u64, String)>) {
+  debug!("collecting sample");
+  match fetch(url).await {
         Ok(value) => {
             if let Err(err) = tx.try_send(value) {
                 error!("unable to send sample: {}", err);
@@ -146,7 +147,7 @@ async fn polling_loop(host: String, port: u16, interval: u64, url: Uri, tx: Send
             }
             _ = sample_interval.tick() => {
               debug!("scheduling sample");
-              poll(url.clone(), tx.clone()).await;
+              tokio::spawn(collect(url.clone(), tx.clone()));
             }
             Ok((tcp_stream, _)) = listener.accept() => {
               tokio::spawn(
@@ -154,9 +155,7 @@ async fn polling_loop(host: String, port: u16, interval: u64, url: Uri, tx: Send
                       .keep_alive(false)
                       .serve_connection(TokioIo::new(tcp_stream), Svc{}));
           }
-
         }
-        task::yield_now().await;
     }
 }
 
@@ -184,6 +183,7 @@ async fn writer_loop(mut rx: Receiver<(u64, String)>, mut writer: TableWriter) {
             Some((timestamp_millis, exposition)) => {
                 debug!("processing sample");
                 writer.write(timestamp_millis, &exposition);
+                debug!("processing done");
             }
             None => {
                 info!("no more samples to process");
