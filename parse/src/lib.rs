@@ -38,9 +38,9 @@ pub type LabelSet<'a> = Vec<(&'a str, &'a str)>;
 
 #[derive(Clone, Debug)]
 pub struct Sample<'a> {
-    var: &'a str,
-    labels: LabelSet<'a>,
-    value: &'a str,
+    pub var: &'a str,
+    pub labels: LabelSet<'a>,
+    pub value: &'a str,
     // TODO: Support exemplars?
     // timestamp: Option<&'a str>,
     // exemplar: Option<Exemplar>,
@@ -59,12 +59,10 @@ impl<'a> MetricFamily<'a> {
         debug_assert_eq!(pair.as_rule(), Rule::metricfamily);
 
         let mut metric_family = MetricFamily::default();
-        let mut samples: Vec<(&str, Sample)> = Vec::new();
-
         for child in pair.into_inner() {
             match child.as_rule() {
                 Rule::metricdescriptor => {
-                    if !samples.is_empty() {
+                    if !metric_family.samples.is_empty() {
                         error!("Metric Descriptor after samples");
                         return None;
                     }
