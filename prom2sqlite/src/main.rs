@@ -52,11 +52,25 @@ const INDEX_HTML: &str = include_str!("./index.html");
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// The IP address to listen on for connections.
+    /// Only needed when running as a server.
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
 
+    /// The port number to use.
+    /// Only needed when running as a server.
     #[arg(short, long, default_value_t = 8080)]
     port: u16,
+
+    // The instance label to use for all samples.
+    // If not provided, the address of the source URL will be used.
+    #[arg(long)]
+    instance: Option<String>,
+
+    // The job label to use for all samples.
+    // If not provided, the address of the source URL will be used.
+    #[arg(long)]
+    job: Option<String>,
 
     /// How often metrics will be scraped, in seconds.
     #[arg(short, long, default_value_t = 5)]
@@ -186,7 +200,7 @@ async fn writer_loop(mut rx: Receiver<(u64, String)>, mut writer: TableWriter) {
                 debug!("processing done");
             }
             None => {
-                info!("no more samples to process");
+                debug!("no more samples to process");
                 break;
             }
         }
@@ -194,31 +208,47 @@ async fn writer_loop(mut rx: Receiver<(u64, String)>, mut writer: TableWriter) {
 }
 
 async fn run(args: Args) -> Result<ExitCode, Error> {
-    let (tx, rx) = channel::<(u64, String)>(args.buffer);
+    let uri = match args.source.as_str() {
+        "-" => None,
+        uri => match uri.parse::<Uri>() {
+            Ok(uri) => Some(uri),
+            Err(err) => {
+                error!("invalid URI {}: {}", uri, err);
+                return Ok(ExitCode::FAILURE);
+            }
+        },
+    };
 
-    let writer = match TableWriter::open(&args.target) {
+    let mut writer = match TableWriter::open(&args.target) {
         Ok(writer) => writer,
         Err(err) => {
             error!("error opening database: {}", err);
             return Ok(ExitCode::FAILURE);
         }
     };
+    if let Some(instance) = args.instance.as_ref() {
+        writer.set_instance(instance);
+    } else if let Some(authority) = uri
+        .as_ref()
+        .and_then(|url| url.authority())
+        .map(|f| f.as_str())
+    {
+        writer.set_instance(authority);
+    }
+    if let Some(job) = args.job.as_ref() {
+        writer.set_job(job);
+    }
+
+    let (tx, rx) = channel::<(u64, String)>(args.buffer);
     let writer_task = tokio::spawn(writer_loop(rx, writer));
 
-    let exit_code = match args.source.as_str() {
-        "-" => read_from_stdin(tx),
-        uri => match uri.parse() {
-            Ok(uri) => {
-                debug!("starting polling loop");
-                polling_loop(args.host, args.port, args.interval, uri, tx).await;
-                ExitCode::SUCCESS
-            }
-            Err(err) => {
-                drop(tx);
-                error!("invalid URL {}: {}", uri, err);
-                ExitCode::FAILURE
-            }
-        },
+    let exit_code = match uri {
+        None => read_from_stdin(tx),
+        Some(uri) => {
+            debug!("starting polling loop");
+            polling_loop(args.host, args.port, args.interval, uri, tx).await;
+            ExitCode::SUCCESS
+        }
     };
     debug!("waiting for writer task to complete");
     writer_task.await?;

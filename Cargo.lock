@@ -892,6 +892,7 @@ name = "prom2sqlite"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "chrono",
  "clap",
  "env_logger",
  "fetch",
