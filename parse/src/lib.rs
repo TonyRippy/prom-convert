@@ -57,7 +57,6 @@ pub struct MetricFamily<'a> {
 impl<'a> MetricFamily<'a> {
     fn parse(pair: Pair<'a, Rule>) -> Option<MetricFamily> {
         debug_assert_eq!(pair.as_rule(), Rule::metricfamily);
-
         let mut metric_family = MetricFamily::default();
         for child in pair.into_inner() {
             match child.as_rule() {
