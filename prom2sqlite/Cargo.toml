@@ -26,8 +26,3 @@ prometheus = { version = "0.13.3", features = ["process"] }
 tokio = { version = "1", features = ["macros", "net", "rt", "signal", "time"] }
 sqlite = "0.33.0"
 chrono = "0.4.33"
-
-[build-dependencies]
-npm_rs = "1"
-
-[dev-dependencies]
