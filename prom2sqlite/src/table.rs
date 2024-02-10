@@ -65,9 +65,11 @@ impl TableWriter {
     fn create_scalar(&self, var: &str, value_type: ColumnType) -> sqlite::Result<()> {
         let sql = format!(
             "CREATE TABLE {:?} (
-                timestamp DATETIME NOT NULL,
                 series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
-                value {} NOT NULL);",
+                timestamp DATETIME NOT NULL,
+                value {} NOT NULL,
+                PRIMARY KEY (series_id, timestamp)
+            );",
             var,
             match value_type {
                 ColumnType::String => "TEXT",
@@ -257,7 +259,7 @@ impl TableWriter {
         Ok(series_id)
     }
 
-    fn insert_vanilla_sample<T: BindableWithIndex>(
+    fn insert_scalar<T: BindableWithIndex>(
         &self,
         table_name: &str,
         timestamp: &str,
@@ -265,11 +267,11 @@ impl TableWriter {
         value: T,
     ) -> sqlite::Result<()> {
         let mut stmt = self.connection.prepare(&format!(
-            "INSERT INTO {:?} (timestamp, series_id, value) VALUES (?, ?, ?)",
+            "INSERT INTO {:?} (series_id, timestamp, value) VALUES (?, ?, ?)",
             table_name
         ))?;
-        stmt.bind((1, timestamp))?;
-        stmt.bind((2, series_id))?;
+        stmt.bind((1, series_id))?;
+        stmt.bind((2, timestamp))?;
         stmt.bind((3, value))?;
         match stmt.next()? {
             State::Done => Ok(()),
@@ -311,9 +313,9 @@ impl TableWriter {
                             return false;
                         }
                     };
-                    self.insert_vanilla_sample(family.var.unwrap(), &timestamp, series_id, value)
+                    self.insert_scalar(family.var.unwrap(), &timestamp, series_id, value)
                 }
-                SampleType::Untyped => self.insert_vanilla_sample(
+                SampleType::Untyped => self.insert_scalar(
                     family.var.unwrap(),
                     &timestamp,
                     series_id,
