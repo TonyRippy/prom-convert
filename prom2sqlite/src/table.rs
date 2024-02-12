@@ -15,7 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use parse::{parse, LabelSet, MetricFamily, SampleType};
-use sqlite::{BindableWithIndex, State};
+use rusqlite::{Connection, ToSql};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -28,7 +28,7 @@ pub enum ColumnType {
 }
 
 pub struct TableWriter {
-    connection: sqlite::Connection,
+    connection: Connection,
     instance: Option<i64>,
     job: Option<i64>,
     metric_cache: HashMap<String, i64>,
@@ -38,9 +38,10 @@ pub struct TableWriter {
 }
 
 impl TableWriter {
-    pub fn open(database: &str) -> sqlite::Result<TableWriter> {
-        let connection = sqlite::open(database)?;
-        connection.execute(PRELUDE_SQL)?;
+    pub fn open(database: &str) -> rusqlite::Result<TableWriter> {
+        info!("using sqlite version {}", rusqlite::version());
+        let connection = Connection::open(database)?;
+        connection.execute_batch(PRELUDE_SQL)?;
         Ok(TableWriter {
             connection,
             instance: None,
@@ -52,17 +53,17 @@ impl TableWriter {
         })
     }
 
-    pub fn set_instance(&mut self, instance: &str) -> sqlite::Result<()> {
+    pub fn set_instance(&mut self, instance: &str) -> rusqlite::Result<()> {
         self.instance = Some(self.get_label_value_cached("instance", instance)?);
         Ok(())
     }
 
-    pub fn set_job(&mut self, job: &str) -> sqlite::Result<()> {
+    pub fn set_job(&mut self, job: &str) -> rusqlite::Result<()> {
         self.job = Some(self.get_label_value_cached("job", job)?);
         Ok(())
     }
 
-    fn create_scalar(&self, var: &str, value_type: ColumnType) -> sqlite::Result<()> {
+    fn create_scalar(&self, var: &str, value_type: ColumnType) -> rusqlite::Result<()> {
         let sql = format!(
             "CREATE TABLE {:?} (
                 series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
@@ -77,24 +78,24 @@ impl TableWriter {
                 ColumnType::Float => "REAL",
             }
         );
-        self.connection.execute(sql)
+        self.connection.execute(&sql, ())?;
+        Ok(())
     }
 
-    fn get_metric_id(&self, family: &MetricFamily) -> sqlite::Result<i64> {
+    fn get_metric_id(&self, family: &MetricFamily) -> rusqlite::Result<i64> {
         // TODO: Wrap in a transaction?
         let mut stmt = self
             .connection
-            .prepare("SELECT id FROM metric WHERE name = ?")?;
-        stmt.bind((1, family.var.unwrap()))?;
-        if State::Row == stmt.next()? {
-            return stmt.read(0);
+            .prepare("SELECT id FROM metric WHERE name = ?1")?;
+        let mut rows = stmt.query((family.var.unwrap(),))?;
+        if let Some(row) = rows.next()? {
+            return row.get(0);
         }
         let mut stmt = self
             .connection
-            .prepare("INSERT INTO metric (name, type, help) VALUES (?, ?, ?) RETURNING id")?;
-        stmt.bind((1, family.var.unwrap()))?;
-        stmt.bind((
-            2,
+            .prepare("INSERT INTO metric (name, type, help) VALUES (?1, ?2, ?3) RETURNING id")?;
+        let mut rows = stmt.query((
+            family.var.unwrap(),
             match family.r#type {
                 SampleType::Counter => "counter",
                 SampleType::Gauge => "gauge",
@@ -102,11 +103,11 @@ impl TableWriter {
                 SampleType::Summary => "summary",
                 SampleType::Histogram => "histogram",
             },
+            family.help,
         ))?;
-        stmt.bind((3, family.help))?;
-        let id = match stmt.next()? {
-            State::Row => stmt.read(0)?,
-            State::Done => unreachable!(),
+        let id = match rows.next()? {
+            Some(row) => row.get(0)?,
+            None => unreachable!(),
         };
         // Create a timeseries table for the metric.
         match family.r#type {
@@ -124,7 +125,7 @@ impl TableWriter {
         Ok(id)
     }
 
-    fn get_metric_id_cached(&mut self, family: &MetricFamily) -> sqlite::Result<i64> {
+    fn get_metric_id_cached(&mut self, family: &MetricFamily) -> rusqlite::Result<i64> {
         if let Some(id) = self.metric_cache.get(family.var.unwrap()) {
             return Ok(*id);
         }
@@ -134,25 +135,25 @@ impl TableWriter {
         Ok(id)
     }
 
-    fn get_label_id(&self, label: &str) -> sqlite::Result<i64> {
+    fn get_label_id(&self, label: &str) -> rusqlite::Result<i64> {
         let mut stmt = self
             .connection
-            .prepare("SELECT id FROM label WHERE name = ?")?;
-        stmt.bind((1, label))?;
-        if State::Row == stmt.next()? {
-            return stmt.read(0);
+            .prepare("SELECT id FROM label WHERE name = ?1")?;
+        let mut rows = stmt.query((label,))?;
+        if let Some(row) = rows.next()? {
+            return row.get(0);
         }
         let mut stmt = self
             .connection
-            .prepare("INSERT INTO label (name) VALUES (?) RETURNING id")?;
-        stmt.bind((1, label))?;
-        match stmt.next()? {
-            State::Row => stmt.read(0),
-            State::Done => unreachable!(),
+            .prepare("INSERT INTO label (name) VALUES (?1) RETURNING id")?;
+        let mut rows = stmt.query((label,))?;
+        match rows.next()? {
+            Some(row) => row.get(0),
+            None => unreachable!(),
         }
     }
 
-    fn get_label_id_cached(&mut self, label: &str) -> sqlite::Result<i64> {
+    fn get_label_id_cached(&mut self, label: &str) -> rusqlite::Result<i64> {
         if let Some(id) = self.label_cache.get(label) {
             return Ok(*id);
         }
@@ -161,27 +162,25 @@ impl TableWriter {
         Ok(id)
     }
 
-    fn get_label_value(&mut self, label_id: i64, value: &str) -> sqlite::Result<i64> {
+    fn get_label_value(&mut self, label_id: i64, value: &str) -> rusqlite::Result<i64> {
         let mut stmt = self
             .connection
-            .prepare("SELECT id FROM label_value WHERE label_id = ? AND value = ?")?;
-        stmt.bind((1, label_id))?;
-        stmt.bind((2, value))?;
-        if State::Row == stmt.next()? {
-            return stmt.read(0);
+            .prepare("SELECT id FROM label_value WHERE label_id = ?1 AND value = ?2")?;
+        let mut rows = stmt.query((label_id, value))?;
+        if let Some(row) = rows.next()? {
+            return row.get(0);
         }
         let mut stmt = self
             .connection
-            .prepare("INSERT INTO label_value (label_id, value) VALUES (?, ?) RETURNING id")?;
-        stmt.bind((1, label_id))?;
-        stmt.bind((2, value))?;
-        match stmt.next()? {
-            State::Row => stmt.read(0),
-            State::Done => unreachable!(),
+            .prepare("INSERT INTO label_value (label_id, value) VALUES (?1, ?2) RETURNING id")?;
+        let mut rows = stmt.query((label_id, value))?;
+        match rows.next()? {
+            Some(row) => row.get(0),
+            None => unreachable!(),
         }
     }
 
-    fn get_label_value_cached(&mut self, label: &str, value: &str) -> sqlite::Result<i64> {
+    fn get_label_value_cached(&mut self, label: &str, value: &str) -> rusqlite::Result<i64> {
         let label_id = self.get_label_id_cached(label)?;
         let key = (label_id, value.to_string());
         if let Some(id) = self.label_value_cache.get(&key) {
@@ -192,7 +191,7 @@ impl TableWriter {
         Ok(id)
     }
 
-    fn get_series_id(&mut self, metric_id: i64, label_value_ids: &[i64]) -> sqlite::Result<i64> {
+    fn get_series_id(&mut self, metric_id: i64, label_value_ids: &[i64]) -> rusqlite::Result<i64> {
         // Build a query to find any series that matches those labels
         // BUG: this doesn't verify that it matches *only* these labels!
         let mut sql = vec![format!(
@@ -206,30 +205,26 @@ impl TableWriter {
             ));
         }
         let sql = sql.join(" INTERSECT ");
-
         let mut stmt = self.connection.prepare(&sql)?;
-        if stmt.next()? == State::Row {
-            return stmt.read(0);
+        let mut rows = stmt.query(())?;
+        if let Some(row) = rows.next()? {
+            return row.get(0);
         }
+
         // Insert a new series.
         let mut stmt = self
             .connection
-            .prepare("INSERT INTO series (metric_id) VALUES (?) RETURNING id")?;
-        stmt.bind((1, metric_id))?;
-        let series_id = match stmt.next()? {
-            State::Row => stmt.read(0)?,
-            State::Done => unreachable!(),
+            .prepare("INSERT INTO series (metric_id) VALUES (?1) RETURNING id")?;
+        let mut rows = stmt.query((metric_id,))?;
+        let series_id = match rows.next()? {
+            Some(row) => row.get(0)?,
+            None => unreachable!(),
         };
+        let mut stmt = self
+            .connection
+            .prepare("INSERT INTO label_set (series_id, label_value_id) VALUES (?1, ?2)")?;
         for label_value_id in label_value_ids.iter() {
-            let mut stmt = self
-                .connection
-                .prepare("INSERT INTO label_set (series_id, label_value_id) VALUES (?, ?)")?;
-            stmt.bind((1, series_id))?;
-            stmt.bind((2, *label_value_id))?;
-            match stmt.next()? {
-                State::Row => unreachable!(),
-                State::Done => {}
-            }
+            stmt.insert((series_id, *label_value_id))?;
         }
         Ok(series_id)
     }
@@ -238,7 +233,7 @@ impl TableWriter {
         &mut self,
         metric_id: i64,
         label_set: &LabelSet,
-    ) -> sqlite::Result<i64> {
+    ) -> rusqlite::Result<i64> {
         let mut label_value_ids = Vec::with_capacity(label_set.len() + 2);
         if let Some(label_value_id) = self.instance {
             label_value_ids.push(label_value_id);
@@ -259,24 +254,19 @@ impl TableWriter {
         Ok(series_id)
     }
 
-    fn insert_scalar<T: BindableWithIndex>(
+    fn insert_scalar<T: ToSql>(
         &self,
         table_name: &str,
         timestamp: &str,
         series_id: i64,
         value: T,
-    ) -> sqlite::Result<()> {
+    ) -> rusqlite::Result<()> {
         let mut stmt = self.connection.prepare(&format!(
-            "INSERT INTO {:?} (series_id, timestamp, value) VALUES (?, ?, ?)",
+            "INSERT INTO {:?} (series_id, timestamp, value) VALUES (?1, ?2, ?3)",
             table_name
         ))?;
-        stmt.bind((1, series_id))?;
-        stmt.bind((2, timestamp))?;
-        stmt.bind((3, value))?;
-        match stmt.next()? {
-            State::Done => Ok(()),
-            State::Row => unreachable!(),
-        }
+        stmt.insert((series_id, timestamp, value))?;
+        Ok(())
     }
 
     fn process_metric_family(&mut self, timestamp_millis: u64, family: &MetricFamily) -> bool {
@@ -315,12 +305,9 @@ impl TableWriter {
                     };
                     self.insert_scalar(family.var.unwrap(), &timestamp, series_id, value)
                 }
-                SampleType::Untyped => self.insert_scalar(
-                    family.var.unwrap(),
-                    &timestamp,
-                    series_id,
-                    sample.value,
-                ),
+                SampleType::Untyped => {
+                    self.insert_scalar(family.var.unwrap(), &timestamp, series_id, sample.value)
+                }
                 SampleType::Summary => {
                     // TODO
                     Ok(())
