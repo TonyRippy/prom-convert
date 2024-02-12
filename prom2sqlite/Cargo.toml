@@ -9,7 +9,7 @@ edition = "2021"
 
 [dependencies]
 bytes = "1.5"
-chrono = "0.4.33"
+chrono = "0.4.34"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11.1"
 fetch = { path = "../fetch" }
