@@ -1,7 +1,6 @@
 [workspace]
 members = [
-    "fetch",
-    "parse",
+    "driver",
     "prom2sqlite",
 ]
 resolver = "2"

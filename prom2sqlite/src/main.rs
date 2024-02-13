@@ -42,7 +42,7 @@ use tokio::signal;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::MissedTickBehavior;
 
-use fetch::fetch;
+use driver::fetch::fetch;
 
 mod table;
 use table::TableWriter;

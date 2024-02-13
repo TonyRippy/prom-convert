@@ -304,6 +304,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver"
+version = "0.0.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "log",
+ "pest",
+ "pest_derive",
+ "prometheus",
+ "tokio",
+]
+
+[[package]]
 name = "env_filter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -353,20 +369,6 @@ name = "fallible-streaming-iterator"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
-
-[[package]]
-name = "fetch"
-version = "0.0.0"
-dependencies = [
- "bytes",
- "chrono",
- "http-body-util",
- "hyper",
- "hyper-util",
- "log",
- "prometheus",
- "tokio",
-]
 
 [[package]]
 name = "fnv"
@@ -833,15 +835,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "parse"
-version = "0.0.0"
-dependencies = [
- "log",
- "pest",
- "pest_derive",
-]
-
-[[package]]
 name = "percent-encoding"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -945,8 +938,8 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "driver",
  "env_logger",
- "fetch",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -954,7 +947,6 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-prometheus",
  "opentelemetry_sdk",
- "parse",
  "pest",
  "pest_derive",
  "prometheus",

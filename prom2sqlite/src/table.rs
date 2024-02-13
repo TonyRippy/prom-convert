@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use parse::{parse, LabelSet, MetricFamily, SampleType};
+use driver::parse::{parse, LabelSet, MetricFamily, SampleType};
 use rusqlite::{Connection, ToSql};
 use std::collections::HashMap;
 use std::time::Instant;
