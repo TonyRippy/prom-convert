@@ -21,12 +21,6 @@ use std::time::Instant;
 
 const PRELUDE_SQL: &str = include_str!("./prelude.sql");
 
-pub enum ColumnType {
-    String,
-    Integer,
-    Float,
-}
-
 pub struct TableWriter {
     connection: Connection,
     instance: Option<i64>,
@@ -63,20 +57,15 @@ impl TableWriter {
         Ok(())
     }
 
-    fn create_scalar(&self, var: &str, value_type: ColumnType) -> rusqlite::Result<()> {
+    fn create_scalar(&self, var: &str) -> rusqlite::Result<()> {
         let sql = format!(
             "CREATE TABLE {:?} (
                 series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
                 timestamp DATETIME NOT NULL,
-                value {} NOT NULL,
+                value REAL NOT NULL,
                 PRIMARY KEY (series_id, timestamp)
             );",
-            var,
-            match value_type {
-                ColumnType::String => "TEXT",
-                ColumnType::Integer => "INTEGER",
-                ColumnType::Float => "REAL",
-            }
+            var
         );
         self.connection.execute(&sql, ())?;
         Ok(())
@@ -111,10 +100,9 @@ impl TableWriter {
         };
         // Create a timeseries table for the metric.
         match family.r#type {
-            SampleType::Counter | SampleType::Gauge => {
-                self.create_scalar(family.var.unwrap(), ColumnType::Float)?
+            SampleType::Counter | SampleType::Gauge | SampleType::Untyped => {
+                self.create_scalar(family.var.unwrap())?
             }
-            SampleType::Untyped => self.create_scalar(family.var.unwrap(), ColumnType::String)?,
             SampleType::Summary => {
                 // TODO:  implement summary table creation
             }
