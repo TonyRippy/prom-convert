@@ -76,7 +76,7 @@ struct Args {
     #[arg(short, long, default_value_t = 5)]
     interval: u64,
 
-    // How many scrapes to hold in memory before dropping samples.
+    /// How many scrapes to hold in memory before dropping samples.
     #[arg(short, long, default_value_t = 5)]
     buffer: usize,
 
