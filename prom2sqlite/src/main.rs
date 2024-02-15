@@ -227,16 +227,22 @@ async fn run(args: Args) -> Result<ExitCode, Error> {
         }
     };
     if let Some(instance) = args.instance.as_ref() {
-        writer.set_instance(instance);
+        if let Err(err) =  writer.set_instance(instance) {
+            warn!("unable to set \"instance\" label to \"{}\": {}", instance, err);
+        }
     } else if let Some(authority) = uri
         .as_ref()
         .and_then(|url| url.authority())
         .map(|f| f.as_str())
     {
-        writer.set_instance(authority);
+        if let Err(err) =  writer.set_instance(authority) {
+            warn!("unable to set \"instance\" label to \"{}\": {}", authority, err);
+        }
     }
     if let Some(job) = args.job.as_ref() {
-        writer.set_job(job);
+        if let Err(err) =  writer.set_job(job) {
+            warn!("unable to set \"job\" label to \"{}\": {}", job, err);
+        }
     }
 
     let (tx, rx) = channel::<(u64, String)>(args.buffer);
