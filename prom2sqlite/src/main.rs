@@ -80,6 +80,10 @@ struct Args {
     #[arg(short, long, default_value_t = 5)]
     buffer: usize,
 
+    /// Path to the Stanchion SQLite extension.
+    #[arg(long)]
+    stanchion: Option<String>,
+
     /// The URL of a Prometheus client endpoint to scrape.
     /// If "-", then read from stdin.
     source: String,
@@ -219,7 +223,7 @@ async fn run(args: Args) -> Result<ExitCode, Error> {
         },
     };
 
-    let mut writer = match TableWriter::open(&args.target) {
+    let mut writer = match TableWriter::open(&args.target, args.stanchion.as_deref()) {
         Ok(writer) => writer,
         Err(err) => {
             error!("error opening database: {}", err);

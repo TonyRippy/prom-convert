@@ -1,4 +1,4 @@
-// SQL-like abstractions used as an intermediate represntation .
+// SQL-like abstractions used as an intermediate representation.
 // Copyright (C) 2024, Tony Rippy
 //
 // This program is free software: you can redistribute it and/or modify
@@ -15,7 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use driver::parse::{parse, LabelSet, MetricFamily, SampleType};
-use rusqlite::{Connection, ToSql};
+use rusqlite::{Connection, LoadExtensionGuard};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -23,6 +23,7 @@ const PRELUDE_SQL: &str = include_str!("./prelude.sql");
 
 pub struct TableWriter {
     connection: Connection,
+    use_stanchion: bool,
     instance: Option<i64>,
     job: Option<i64>,
     metric_cache: HashMap<String, i64>,
@@ -32,12 +33,20 @@ pub struct TableWriter {
 }
 
 impl TableWriter {
-    pub fn open(database: &str) -> rusqlite::Result<TableWriter> {
+    pub fn open(database: &str, stanchion: Option<&str>) -> rusqlite::Result<TableWriter> {
         info!("using sqlite version {}", rusqlite::version());
-                let connection = Connection::open(database)?;
-                connection.execute_batch(PRELUDE_SQL)?;
+        let connection = Connection::open(database)?;
+        if let Some(stanchion) = stanchion {
+            info!("using stanchion from {}", stanchion);
+            unsafe {
+                let _guard = LoadExtensionGuard::new(&connection)?;
+                connection.load_extension(stanchion, None)?;
+            }
+        }
+        connection.execute_batch(PRELUDE_SQL)?;
         Ok(TableWriter {
             connection,
+            use_stanchion: stanchion.is_some(),
             instance: None,
             job: None,
             metric_cache: HashMap::new(),
@@ -57,17 +66,54 @@ impl TableWriter {
         Ok(())
     }
 
-    fn create_scalar(&self, var: &str) -> rusqlite::Result<()> {
-        let sql = format!(
-            "CREATE TABLE {:?} (
-                series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
-                timestamp DATETIME NOT NULL,
-                value REAL NOT NULL,
-                PRIMARY KEY (series_id, timestamp)
+    fn create_scalar(&self, table_name: &str) -> rusqlite::Result<()> {
+        let sql = if self.use_stanchion {
+            format!(
+                "CREATE VIRTUAL TABLE {:?} USING stanchion (
+                    series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+                    timestamp INTEGER NOT NULL,
+                    value REAL NOT NULL,
+                    SORT KEY (series_id, timestamp)
             );",
-            var
-        );
+                table_name
+            )
+        } else {
+            format!(
+                "CREATE TABLE {:?} (
+                    series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+                    timestamp DATETIME NOT NULL,
+                    value REAL NOT NULL,
+                    PRIMARY KEY (series_id, timestamp)
+            );",
+                table_name
+            )
+        };
         self.connection.execute(&sql, ())?;
+        Ok(())
+    }
+
+    fn insert_scalar(
+        &self,
+        table_name: &str,
+        timestamp_millis: u64,
+        series_id: i64,
+        value: f64,
+    ) -> rusqlite::Result<()> {
+        let mut stmt = self.connection.prepare(&format!(
+            "INSERT INTO {:?} (series_id, timestamp, value) VALUES (?1, ?2, ?3)",
+            table_name
+        ))?;
+        if self.use_stanchion {
+            stmt.insert((series_id, timestamp_millis, value))?;
+        } else {
+            stmt.insert((
+                series_id,
+                chrono::DateTime::from_timestamp_millis(timestamp_millis as i64)
+                    .unwrap()
+                    .to_rfc3339(),
+                value,
+            ))?;
+        }
         Ok(())
     }
 
@@ -101,7 +147,7 @@ impl TableWriter {
         // Create a timeseries table for the metric.
         match family.r#type {
             SampleType::Counter | SampleType::Gauge | SampleType::Untyped => {
-                                self.create_scalar(family.var.unwrap())?
+                self.create_scalar(family.var.unwrap())?
             }
             SampleType::Summary => {
                 // TODO:  implement summary table creation
@@ -242,26 +288,8 @@ impl TableWriter {
         Ok(series_id)
     }
 
-    fn insert_scalar<T: ToSql>(
-        &self,
-        table_name: &str,
-        timestamp: &str,
-        series_id: i64,
-        value: T,
-    ) -> rusqlite::Result<()> {
-        let mut stmt = self.connection.prepare(&format!(
-            "INSERT INTO {:?} (series_id, timestamp, value) VALUES (?1, ?2, ?3)",
-            table_name
-        ))?;
-        stmt.insert((series_id, timestamp, value))?;
-        Ok(())
-    }
-
     fn process_metric_family(&mut self, timestamp_millis: u64, family: &MetricFamily) -> bool {
         // TODO: wrap this in a transaction?
-        let timestamp = chrono::DateTime::from_timestamp_millis(timestamp_millis as i64)
-        .unwrap()
-        .to_rfc3339();
         let metric_id = match self.get_metric_id_cached(family) {
             Ok(id) => id,
             Err(err) => {
