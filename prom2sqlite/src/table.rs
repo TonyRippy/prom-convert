@@ -34,8 +34,8 @@ pub struct TableWriter {
 impl TableWriter {
     pub fn open(database: &str) -> rusqlite::Result<TableWriter> {
         info!("using sqlite version {}", rusqlite::version());
-        let connection = Connection::open(database)?;
-        connection.execute_batch(PRELUDE_SQL)?;
+                let connection = Connection::open(database)?;
+                connection.execute_batch(PRELUDE_SQL)?;
         Ok(TableWriter {
             connection,
             instance: None,
@@ -101,7 +101,7 @@ impl TableWriter {
         // Create a timeseries table for the metric.
         match family.r#type {
             SampleType::Counter | SampleType::Gauge | SampleType::Untyped => {
-                self.create_scalar(family.var.unwrap())?
+                                self.create_scalar(family.var.unwrap())?
             }
             SampleType::Summary => {
                 // TODO:  implement summary table creation
@@ -260,8 +260,8 @@ impl TableWriter {
     fn process_metric_family(&mut self, timestamp_millis: u64, family: &MetricFamily) -> bool {
         // TODO: wrap this in a transaction?
         let timestamp = chrono::DateTime::from_timestamp_millis(timestamp_millis as i64)
-            .unwrap()
-            .to_rfc3339();
+        .unwrap()
+        .to_rfc3339();
         let metric_id = match self.get_metric_id_cached(family) {
             Ok(id) => id,
             Err(err) => {
@@ -283,18 +283,15 @@ impl TableWriter {
                 }
             };
             let result = match family.r#type {
-                SampleType::Counter | SampleType::Gauge => {
+                SampleType::Counter | SampleType::Gauge | SampleType::Untyped => {
                     let value = match sample.value.parse::<f64>() {
                         Ok(value) => value,
                         Err(err) => {
-                            error!("unable to parse gauge value {:?}: {}", sample.value, err);
+                            error!("unable to parse scalar value {:?}: {}", sample.value, err);
                             return false;
                         }
                     };
-                    self.insert_scalar(family.var.unwrap(), &timestamp, series_id, value)
-                }
-                SampleType::Untyped => {
-                    self.insert_scalar(family.var.unwrap(), &timestamp, series_id, sample.value)
+                    self.insert_scalar(family.var.unwrap(), timestamp_millis, series_id, value)
                 }
                 SampleType::Summary => {
                     // TODO
