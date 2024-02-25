@@ -26,3 +26,20 @@ CREATE TABLE IF NOT EXISTS label_set (
   series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
   PRIMARY KEY (label_value_id, series_id)
 );
+
+CREATE VIEW IF NOT EXISTS label_value_view AS
+  SELECT lv.id, concat(l.name, '="', lv.value, '"') as label
+  FROM label_value lv
+  INNER JOIN label l ON lv.label_id = l.id;
+
+CREATE VIEW IF NOT EXISTS label_set_view AS
+  SELECT ls.series_id, GROUP_CONCAT(lv.label, ', ') as label_set
+  FROM label_set ls
+  INNER JOIN label_value_view lv ON lv.id = ls.label_value_id
+  GROUP BY ls.series_id;
+
+CREATE VIEW IF NOT EXISTS series_view AS
+  SELECT s.id, CONCAT(m.name, '{', ls.label_set, '}') as name
+  FROM series s
+  INNER JOIN metric m ON m.id = s.metric_id
+  INNER JOIN label_set_view ls ON ls.series_id = s.id;
