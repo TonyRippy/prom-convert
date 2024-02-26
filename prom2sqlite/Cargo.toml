@@ -14,7 +14,7 @@ clap = { version = "4", features = ["derive"] }
 driver = { path = "../driver" }
 env_logger = "0.11.2"
 http-body-util = "0.1"
-hyper = { version = "1.0", features = ["client", "server", "http1"] }
+hyper = { version = "1.2", features = ["client", "server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 log = "0.4"
 opentelemetry = { version = "0.21.0", features = ["metrics"] }
