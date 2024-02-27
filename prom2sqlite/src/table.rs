@@ -19,7 +19,7 @@ use rusqlite::{Connection, LoadExtensionGuard};
 use std::collections::HashMap;
 use std::time::Instant;
 
-const PRELUDE_SQL: &str = include_str!("./schema.sql");
+const SCHEMA_SQL: &str = include_str!("./schema.sql");
 
 pub struct TableWriter {
     connection: Connection,
@@ -27,8 +27,7 @@ pub struct TableWriter {
     instance: Option<i64>,
     job: Option<i64>,
     metric_cache: HashMap<String, i64>,
-    label_cache: HashMap<String, i64>,
-    label_value_cache: HashMap<(i64, String), i64>,
+    label_value_cache: HashMap<(String, String), i64>,
     series_cache: HashMap<(i64, Vec<i64>), i64>,
 }
 
@@ -43,14 +42,13 @@ impl TableWriter {
                 connection.load_extension(stanchion, None)?;
             }
         }
-        connection.execute_batch(PRELUDE_SQL)?;
+        connection.execute_batch(SCHEMA_SQL)?;
         Ok(TableWriter {
             connection,
             use_stanchion: stanchion.is_some(),
             instance: None,
             job: None,
             metric_cache: HashMap::new(),
-            label_cache: HashMap::new(),
             label_value_cache: HashMap::new(),
             series_cache: HashMap::new(),
         })
@@ -169,45 +167,18 @@ impl TableWriter {
         Ok(id)
     }
 
-    fn get_label_id(&self, label: &str) -> rusqlite::Result<i64> {
+    fn get_label_value(&mut self, label: &str, value: &str) -> rusqlite::Result<i64> {
         let mut stmt = self
             .connection
-            .prepare("SELECT id FROM label WHERE name = ?1")?;
-        let mut rows = stmt.query((label,))?;
+            .prepare("SELECT id FROM label_value WHERE label = ?1 AND value = ?2")?;
+        let mut rows = stmt.query((label, value))?;
         if let Some(row) = rows.next()? {
             return row.get(0);
         }
         let mut stmt = self
             .connection
-            .prepare("INSERT INTO label (name) VALUES (?1) RETURNING id")?;
-        let mut rows = stmt.query((label,))?;
-        match rows.next()? {
-            Some(row) => row.get(0),
-            None => unreachable!(),
-        }
-    }
-
-    fn get_label_id_cached(&mut self, label: &str) -> rusqlite::Result<i64> {
-        if let Some(id) = self.label_cache.get(label) {
-            return Ok(*id);
-        }
-        let id = self.get_label_id(label)?;
-        self.label_cache.insert(label.to_string(), id);
-        Ok(id)
-    }
-
-    fn get_label_value(&mut self, label_id: i64, value: &str) -> rusqlite::Result<i64> {
-        let mut stmt = self
-            .connection
-            .prepare("SELECT id FROM label_value WHERE label_id = ?1 AND value = ?2")?;
-        let mut rows = stmt.query((label_id, value))?;
-        if let Some(row) = rows.next()? {
-            return row.get(0);
-        }
-        let mut stmt = self
-            .connection
-            .prepare("INSERT INTO label_value (label_id, value) VALUES (?1, ?2) RETURNING id")?;
-        let mut rows = stmt.query((label_id, value))?;
+            .prepare("INSERT INTO label_value (label, value) VALUES (?1, ?2) RETURNING id")?;
+        let mut rows = stmt.query((label, value))?;
         match rows.next()? {
             Some(row) => row.get(0),
             None => unreachable!(),
@@ -215,12 +186,11 @@ impl TableWriter {
     }
 
     fn get_label_value_cached(&mut self, label: &str, value: &str) -> rusqlite::Result<i64> {
-        let label_id = self.get_label_id_cached(label)?;
-        let key = (label_id, value.to_string());
+        let key = (label.to_string(), value.to_string());
         if let Some(id) = self.label_value_cache.get(&key) {
             return Ok(*id);
         }
-        let id = self.get_label_value(label_id, value)?;
+        let id = self.get_label_value(label, value)?;
         self.label_value_cache.insert(key, id);
         Ok(id)
     }

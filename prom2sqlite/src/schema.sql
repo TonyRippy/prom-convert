@@ -5,14 +5,9 @@ CREATE TABLE IF NOT EXISTS metric (
   help TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS label (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS label_value (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  label_id INTEGER NOT NULL REFERENCES label(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
   value TEXT NOT NULL
 );
 
@@ -27,15 +22,10 @@ CREATE TABLE IF NOT EXISTS label_set (
   PRIMARY KEY (label_value_id, series_id)
 );
 
-CREATE VIEW IF NOT EXISTS label_value_view AS
-  SELECT lv.id, concat(l.name, '="', lv.value, '"') as label
-  FROM label_value lv
-  INNER JOIN label l ON lv.label_id = l.id;
-
 CREATE VIEW IF NOT EXISTS label_set_view AS
-  SELECT ls.series_id, GROUP_CONCAT(lv.label, ', ') as label_set
+  SELECT ls.series_id, GROUP_CONCAT(CONCAT(lv.label, '="', lv.value, '"'), ', ') as label_set
   FROM label_set ls
-  INNER JOIN label_value_view lv ON lv.id = ls.label_value_id
+  INNER JOIN label_value lv ON lv.id = ls.label_value_id
   GROUP BY ls.series_id;
 
 CREATE VIEW IF NOT EXISTS series_view AS
