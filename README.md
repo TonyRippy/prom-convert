@@ -9,7 +9,7 @@ The formats supported so far are:
 Coming soon:
 
 * Parquet
-* OpenTelementry protobufs
+* OpenTelemetry protobufs
 
 ## Why Do This?
 
