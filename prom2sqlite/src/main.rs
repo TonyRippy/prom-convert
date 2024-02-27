@@ -32,9 +32,6 @@ use hyper::{body::Incoming, Response};
 use hyper::{server::conn::http1, StatusCode};
 use hyper::{Request, Uri};
 use hyper_util::rt::TokioIo;
-use opentelemetry::global;
-use opentelemetry::metrics::MeterProvider as _;
-use opentelemetry_sdk::metrics::MeterProvider;
 use prometheus::{Encoder, TextEncoder};
 use tokio::net::TcpListener;
 use tokio::runtime;
@@ -271,28 +268,9 @@ fn main() -> ExitCode {
     let args = Args::parse();
 
     // Initialize logging
-    // TODO: Figure out how to use OTel's logging support.
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-    debug!("logging configured");
 
-    // Initialize OTel Metrics
-    // TODO
-
-    // configure OpenTelemetry to use this registry
-    let exporter = opentelemetry_prometheus::exporter()
-        .with_registry(prometheus::default_registry().clone())
-        .build()
-        .unwrap();
-    // set up a meter meter to create instruments
-    let provider = MeterProvider::builder().with_reader(exporter).build();
-    let meter = provider.meter("prom2sqlite");
-    debug!("metrics configured");
-
-    // Initialize OTel Tracing
-    // TODO
-    debug!("tracing configured");
-
-    let exit_code = match runtime::Builder::new_current_thread()
+    match runtime::Builder::new_current_thread()
         .enable_time()
         .enable_io()
         .build()
@@ -303,12 +281,5 @@ fn main() -> ExitCode {
             error!("error running application thead: {}", err);
             ExitCode::FAILURE
         }
-    };
-
-    // Shutdown OTel pipelines
-    global::shutdown_tracer_provider();
-    global::shutdown_meter_provider();
-    // global::shutdown_logger_provider();
-
-    exit_code
+    }
 }
