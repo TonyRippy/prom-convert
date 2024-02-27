@@ -19,7 +19,7 @@ use rusqlite::{Connection, LoadExtensionGuard};
 use std::collections::HashMap;
 use std::time::Instant;
 
-const PRELUDE_SQL: &str = include_str!("./prelude.sql");
+const PRELUDE_SQL: &str = include_str!("./schema.sql");
 
 pub struct TableWriter {
     connection: Connection,
