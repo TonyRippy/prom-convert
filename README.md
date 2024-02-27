@@ -1,7 +1,7 @@
-# Prometheus Conversion Tools
+# miniprom (Mini-Prometheus)
 
-This repo contains tools that allow one to collect data from Prometheus clients
-and store the data into a variety of self-contained formats.
+This repo contains small tools that allow one to collect data from Prometheus
+clients and store the data into a variety of self-contained formats.
 The formats supported so far are:
 
 * [SQLite3](prom2sqlite)
