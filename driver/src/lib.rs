@@ -16,7 +16,7 @@
 #[macro_use]
 extern crate log;
 
-use std::io::{Error, Read};
+use std::io::Read;
 use std::process::ExitCode;
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
@@ -29,8 +29,8 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::MissedTickBehavior;
 
 pub mod fetch;
-pub mod parse;
 pub mod http;
+pub mod parse;
 
 pub trait Exporter {
     fn export(&mut self, timestamp_millis: u64, family: &parse::MetricFamily) -> bool;
@@ -150,17 +150,14 @@ async fn writer_loop(
     }
 }
 
-async fn run_async(
-    args: &impl Args,
-    exporter: Box<dyn Exporter + Send>,
-) -> Result<ExitCode, Error> {
+async fn run_async(args: &impl Args, exporter: Box<dyn Exporter + Send>) -> ExitCode {
     let uri = match args.target() {
         "-" => None,
         uri => match uri.parse::<Uri>() {
             Ok(uri) => Some(uri),
             Err(err) => {
                 error!("invalid URI {}: {}", uri, err);
-                return Ok(ExitCode::FAILURE);
+                return ExitCode::FAILURE;
             }
         },
     };
@@ -187,9 +184,11 @@ async fn run_async(
         }
     };
     debug!("waiting for writer task to complete");
-    writer_task.await?;
+    if let Err(err) = writer_task.await {
+        error!("error waiting for writer task to complete: {}", err);
+    }
     debug!("done");
-    Ok(exit_code)
+    exit_code
 }
 
 pub fn run(args: &impl Args, exporter: Box<dyn Exporter + Send>) -> ExitCode {
@@ -197,7 +196,7 @@ pub fn run(args: &impl Args, exporter: Box<dyn Exporter + Send>) -> ExitCode {
         .enable_time()
         .enable_io()
         .build()
-        .and_then(|rt| rt.block_on(run_async(args, exporter)))
+        .map(|rt| rt.block_on(run_async(args, exporter)))
     {
         Ok(exit_code) => exit_code,
         Err(err) => {
