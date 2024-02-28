@@ -50,7 +50,7 @@ pub trait Args {
     fn buffer(&self) -> usize;
 
     /// The URL of a Prometheus client endpoint to scrape.
-    // /// If "-", then read from stdin.
+    /// If "-", then read from stdin.
     fn target(&self) -> &str;
 }
 
