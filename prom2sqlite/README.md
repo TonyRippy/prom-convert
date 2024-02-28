@@ -53,7 +53,11 @@ curl -s http://localhost:9100/metrics | prom2sqlite - out.db
 
 If you specify a URL as the source, then the tool will regularly scrape
 Prometheus data from that URL until the tool is terminated. You can control how
-often the process is sampled using the `--interval` flag.
+often the process is sampled using the `--interval` flag. Example:
+
+```shell
+prom2sqlite --interval=10 http://localhost:9100/metrics out.db
+```
 
 ### Output as Database
 
@@ -61,7 +65,7 @@ The tool takes a second required parameter that specifies where the collected
 data should be written. If the file does not already exist, then it will
 create a new SQLite3 database that uses a [known schema](src/schema.sql). If
 the file already exists, it assumes that it also uses this schema and inserts
-new data into the existing tables. These database use the normal SQLite 
+new data into the existing tables. These databases use the normal SQLite 
 row-based storage.
 
 #### Column Store?
