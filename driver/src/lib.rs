@@ -16,21 +16,12 @@
 #[macro_use]
 extern crate log;
 
-use std::future::Future;
 use std::io::{Error, Read};
-use std::pin::Pin;
 use std::process::ExitCode;
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
-use bytes::Bytes;
-use http_body_util::Full;
-use hyper::service::Service;
-use hyper::{body::Incoming, Response};
-use hyper::{server::conn::http1, StatusCode};
-use hyper::{Request, Uri};
-use hyper_util::rt::TokioIo;
-use prometheus::{Encoder, TextEncoder};
+use hyper::Uri;
 use tokio::net::TcpListener;
 use tokio::runtime;
 use tokio::signal;
@@ -39,8 +30,7 @@ use tokio::time::MissedTickBehavior;
 
 pub mod fetch;
 pub mod parse;
-
-const INDEX_HTML: &str = include_str!("./index.html");
+pub mod http;
 
 pub trait Exporter {
     fn export(&mut self, timestamp_millis: u64, family: &parse::MetricFamily) -> bool;
@@ -62,45 +52,6 @@ pub trait Args {
     /// The URL of a Prometheus client endpoint to scrape.
     // /// If "-", then read from stdin.
     fn target(&self) -> &str;
-}
-
-struct Svc {}
-
-impl Service<Request<Incoming>> for Svc {
-    type Response = Response<Full<Bytes>>;
-    type Error = hyper::http::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let res = match req.uri().path() {
-            "/" => Response::builder()
-                .header("Content-Type", "text/html; charset=utf-8")
-                .status(StatusCode::OK)
-                .body(INDEX_HTML.into()),
-            "/metrics" => {
-                let encoder = TextEncoder::new();
-                let metric_families = prometheus::gather();
-                let mut buffer = vec![];
-                encoder.encode(&metric_families, &mut buffer).unwrap();
-                Response::builder()
-                    .header("Content-Type", encoder.format_type())
-                    .status(StatusCode::OK)
-                    .body(buffer.into())
-            }
-            "/-/healthy" => Response::builder().status(StatusCode::OK).body("OK".into()),
-            "/-/ready" => Response::builder().status(StatusCode::OK).body("OK".into()),
-            "/-/reload" => Response::builder()
-                .status(StatusCode::NOT_IMPLEMENTED)
-                .body(Full::default()),
-            "/-/quit" => Response::builder()
-                .status(StatusCode::NOT_IMPLEMENTED)
-                .body(Full::default()),
-            _ => Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Full::default()),
-        };
-        Box::pin(async { res })
-    }
 }
 
 async fn collect(url: Uri, tx: Sender<(u64, String)>) {
@@ -141,11 +92,8 @@ async fn polling_loop(args: &impl Args, url: Uri, tx: Sender<(u64, String)>) {
               tokio::spawn(collect(url.clone(), tx.clone()));
             }
             Ok((tcp_stream, _)) = listener.accept() => {
-              tokio::spawn(
-                  http1::Builder::new()
-                      .keep_alive(false)
-                      .serve_connection(TokioIo::new(tcp_stream), Svc{}));
-          }
+              http::serve(tcp_stream);
+            }
         }
     }
 }
@@ -202,7 +150,10 @@ async fn writer_loop(
     }
 }
 
-async fn run_async(args: &impl Args, exporter: Box<dyn Exporter + Send>) -> Result<ExitCode, Error> {
+async fn run_async(
+    args: &impl Args,
+    exporter: Box<dyn Exporter + Send>,
+) -> Result<ExitCode, Error> {
     let uri = match args.target() {
         "-" => None,
         uri => match uri.parse::<Uri>() {
