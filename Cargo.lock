@@ -771,20 +771,12 @@ dependencies = [
 name = "prom2sqlite"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "chrono",
  "clap",
  "driver",
  "env_logger",
- "http-body-util",
- "hyper",
- "hyper-util",
  "log",
- "pest",
- "pest_derive",
- "prometheus",
  "rusqlite",
- "tokio",
 ]
 
 [[package]]

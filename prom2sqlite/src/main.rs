@@ -17,34 +17,14 @@
 #[macro_use]
 extern crate log;
 
-use std::future::Future;
-use std::io::{Error, Read};
-use std::pin::Pin;
 use std::process::ExitCode;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use bytes::Bytes;
 use clap::Parser;
 use env_logger::Env;
-use http_body_util::Full;
-use hyper::service::Service;
-use hyper::{body::Incoming, Response};
-use hyper::{server::conn::http1, StatusCode};
-use hyper::{Request, Uri};
-use hyper_util::rt::TokioIo;
-use prometheus::{Encoder, TextEncoder};
-use tokio::net::TcpListener;
-use tokio::runtime;
-use tokio::signal;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::time::MissedTickBehavior;
-
-use driver::fetch::fetch;
 
 mod table;
-use table::TableWriter;
-
-const INDEX_HTML: &str = include_str!("./index.html");
+use table::TableExporter;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -89,178 +69,30 @@ struct Args {
     target: String,
 }
 
-struct Svc {}
-
-impl Service<Request<Incoming>> for Svc {
-    type Response = Response<Full<Bytes>>;
-    type Error = hyper::http::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let res = match req.uri().path() {
-            "/" => Response::builder()
-                .header("Content-Type", "text/html; charset=utf-8")
-                .status(StatusCode::OK)
-                .body(INDEX_HTML.into()),
-            "/metrics" => {
-                let encoder = TextEncoder::new();
-                let metric_families = prometheus::gather();
-                let mut buffer = vec![];
-                encoder.encode(&metric_families, &mut buffer).unwrap();
-                Response::builder()
-                    .header("Content-Type", encoder.format_type())
-                    .status(StatusCode::OK)
-                    .body(buffer.into())
-            }
-            "/-/healthy" => Response::builder().status(StatusCode::OK).body("OK".into()),
-            "/-/ready" => Response::builder().status(StatusCode::OK).body("OK".into()),
-            // "/-/reload" => Response::builder()
-            //     .status(StatusCode::NOT_IMPLEMENTED)
-            //     .body(Full::default()),
-            "/-/quit" => Response::builder()
-                .status(StatusCode::NOT_IMPLEMENTED)
-                .body(Full::default()),
-            _ => Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Full::default()),
-        };
-        Box::pin(async { res })
-    }
-}
-
-async fn collect(url: Uri, tx: Sender<(u64, String)>) {
-    debug!("collecting sample");
-    match fetch(url).await {
-        Ok((timestamp_millis, exposition)) => {
-            debug!("collected sample {}", timestamp_millis);
-            if let Err(err) = tx.try_send((timestamp_millis, exposition)) {
-                error!("unable to send sample {}: {}", timestamp_millis, err);
-            }
-        }
-        Err(err) => error!("unable to collect sample: {}", err),
-    }
-}
-
-async fn polling_loop(host: String, port: u16, interval: u64, url: Uri, tx: Sender<(u64, String)>) {
-    let listener = match TcpListener::bind((host.as_str(), port)).await {
-        Ok(listener) => listener,
-        Err(err) => {
-            error!("error binding to {}:{}: {}", host.as_str(), port, err);
-            return;
-        }
-    };
-    info!("listening on {}:{}", host.as_str(), port);
-
-    let mut sample_interval = tokio::time::interval(Duration::from_secs(interval));
-    sample_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-    loop {
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                info!("Interrupt signal received.");
-                break
-            }
-            _ = sample_interval.tick() => {
-              debug!("scheduling sample");
-              tokio::spawn(collect(url.clone(), tx.clone()));
-            }
-            Ok((tcp_stream, _)) = listener.accept() => {
-              tokio::spawn(
-                  http1::Builder::new()
-                      .keep_alive(false)
-                      .serve_connection(TokioIo::new(tcp_stream), Svc{}));
-          }
-        }
-    }
-}
-
-fn read_from_stdin(tx: Sender<(u64, String)>) -> ExitCode {
-    let mut input = String::new();
-    if let Err(err) = std::io::stdin().read_to_string(&mut input) {
-        error!("error reading from stdin: {}", err);
-        return ExitCode::FAILURE;
-    }
-    let timestamp = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    if let Err(err) = tx.try_send((timestamp, input)) {
-        error!("unable to send sample: {}", err);
-        return ExitCode::FAILURE;
-    }
-    ExitCode::SUCCESS
-}
-
-async fn writer_loop(mut rx: Receiver<(u64, String)>, mut writer: TableWriter) {
-    debug!("writer started");
-    loop {
-        match rx.recv().await {
-            Some((timestamp_millis, exposition)) => {
-                debug!("processing sample {}", timestamp_millis);
-                writer.write(timestamp_millis, &exposition);
-                debug!("processing done");
-            }
-            None => {
-                debug!("no more samples to process");
-                break;
-            }
-        }
-    }
-}
-
-async fn run(args: Args) -> Result<ExitCode, Error> {
-    let uri = match args.source.as_str() {
-        "-" => None,
-        uri => match uri.parse::<Uri>() {
-            Ok(uri) => Some(uri),
-            Err(err) => {
-                error!("invalid URI {}: {}", uri, err);
-                return Ok(ExitCode::FAILURE);
-            }
-        },
-    };
-
-    let mut writer = match TableWriter::open(&args.target, args.stanchion.as_deref()) {
-        Ok(writer) => writer,
-        Err(err) => {
-            error!("error opening database: {}", err);
-            return Ok(ExitCode::FAILURE);
-        }
-    };
-    if let Some(instance) = args.instance.as_ref() {
-        if let Err(err) =  writer.set_instance(instance) {
-            warn!("unable to set \"instance\" label to \"{}\": {}", instance, err);
-        }
-    } else if let Some(authority) = uri
-        .as_ref()
-        .and_then(|url| url.authority())
-        .map(|f| f.as_str())
-    {
-        if let Err(err) =  writer.set_instance(authority) {
-            warn!("unable to set \"instance\" label to \"{}\": {}", authority, err);
-        }
-    }
-    if let Some(job) = args.job.as_ref() {
-        if let Err(err) =  writer.set_job(job) {
-            warn!("unable to set \"job\" label to \"{}\": {}", job, err);
-        }
+impl driver::Args for Args {
+    fn addr(&self) -> (&str, u16) {
+        (self.host.as_str(), self.port)
     }
 
-    let (tx, rx) = channel::<(u64, String)>(args.buffer);
-    let writer_task = tokio::spawn(writer_loop(rx, writer));
+    fn instance(&self) -> Option<&str> {
+        self.instance.as_deref()
+    }
 
-    let exit_code = match uri {
-        None => read_from_stdin(tx),
-        Some(uri) => {
-            debug!("starting polling loop");
-            polling_loop(args.host, args.port, args.interval, uri, tx).await;
-            ExitCode::SUCCESS
-        }
-    };
-    debug!("waiting for writer task to complete");
-    writer_task.await?;
-    debug!("done");
-    Ok(exit_code)
+    fn job(&self) -> Option<&str> {
+        self.job.as_deref()
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(self.interval)
+    }
+
+    fn buffer(&self) -> usize {
+        self.buffer
+    }
+
+    fn target(&self) -> &str {
+        self.source.as_str()
+    }
 }
 
 fn main() -> ExitCode {
@@ -270,16 +102,14 @@ fn main() -> ExitCode {
     // Initialize logging
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
-    match runtime::Builder::new_current_thread()
-        .enable_time()
-        .enable_io()
-        .build()
-        .and_then(|rt| rt.block_on(run(args)))
-    {
-        Ok(exit_code) => exit_code,
-        Err(err) => {
-            error!("error running application thead: {}", err);
-            ExitCode::FAILURE
-        }
-    }
+    let writer = Box::new(
+        match TableExporter::open(&args.target, args.stanchion.as_deref()) {
+            Ok(writer) => writer,
+            Err(err) => {
+                error!("error opening database: {}", err);
+                return ExitCode::FAILURE;
+            }
+        },
+    );
+    driver::run(&args, writer)
 }

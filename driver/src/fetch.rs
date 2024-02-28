@@ -58,7 +58,6 @@ pub async fn fetch(url: Uri) -> FetchResult<(u64, String)> {
         }
         None => Utc::now().timestamp_millis(),
     };
-    // TODO: parse the Date header and use that as the timestamp for the samples?
 
     // TODO: Verify that this decodes string output correctly.
     // This might only work for UTF-8 ecoded data.

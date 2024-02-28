@@ -14,25 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use driver::parse::{parse, LabelSet, MetricFamily, SampleType};
+use driver::parse::{LabelSet, MetricFamily, SampleType};
 use rusqlite::{Connection, LoadExtensionGuard};
 use std::collections::HashMap;
-use std::time::Instant;
 
 const SCHEMA_SQL: &str = include_str!("./schema.sql");
 
-pub struct TableWriter {
+pub struct TableExporter {
     connection: Connection,
     use_stanchion: bool,
-    instance: Option<i64>,
-    job: Option<i64>,
     metric_cache: HashMap<String, i64>,
     label_value_cache: HashMap<(String, String), i64>,
     series_cache: HashMap<(i64, Vec<i64>), i64>,
 }
 
-impl TableWriter {
-    pub fn open(database: &str, stanchion: Option<&str>) -> rusqlite::Result<TableWriter> {
+impl TableExporter {
+    pub fn open(database: &str, stanchion: Option<&str>) -> rusqlite::Result<TableExporter> {
         info!("using sqlite version {}", rusqlite::version());
         let connection = Connection::open(database)?;
         if let Some(stanchion) = stanchion {
@@ -43,25 +40,13 @@ impl TableWriter {
             }
         }
         connection.execute_batch(SCHEMA_SQL)?;
-        Ok(TableWriter {
+        Ok(TableExporter {
             connection,
             use_stanchion: stanchion.is_some(),
-            instance: None,
-            job: None,
             metric_cache: HashMap::new(),
             label_value_cache: HashMap::new(),
             series_cache: HashMap::new(),
         })
-    }
-
-    pub fn set_instance(&mut self, instance: &str) -> rusqlite::Result<()> {
-        self.instance = Some(self.get_label_value_cached("instance", instance)?);
-        Ok(())
-    }
-
-    pub fn set_job(&mut self, job: &str) -> rusqlite::Result<()> {
-        self.job = Some(self.get_label_value_cached("job", job)?);
-        Ok(())
     }
 
     fn create_scalar(&self, table_name: &str) -> rusqlite::Result<()> {
@@ -239,12 +224,6 @@ impl TableWriter {
         label_set: &LabelSet,
     ) -> rusqlite::Result<i64> {
         let mut label_value_ids = Vec::with_capacity(label_set.len() + 2);
-        if let Some(label_value_id) = self.instance {
-            label_value_ids.push(label_value_id);
-        }
-        if let Some(label_value_id) = self.job {
-            label_value_ids.push(label_value_id);
-        }
         for &(label, value) in label_set {
             let label_value_id = self.get_label_value_cached(label, value)?;
             label_value_ids.push(label_value_id);
@@ -257,8 +236,10 @@ impl TableWriter {
         self.series_cache.insert(key, series_id);
         Ok(series_id)
     }
+}
 
-    fn process_metric_family(&mut self, timestamp_millis: u64, family: &MetricFamily) -> bool {
+impl driver::Exporter for TableExporter {
+    fn export(&mut self, timestamp_millis: u64, family: &MetricFamily) -> bool {
         // TODO: wrap this in a transaction?
         let metric_id = match self.get_metric_id_cached(family) {
             Ok(id) => id,
@@ -306,25 +287,5 @@ impl TableWriter {
             }
         }
         true
-    }
-
-    pub fn write(&mut self, timestamp_millis: u64, exposition: &str) -> bool {
-        let start_marker = Instant::now();
-        match parse(exposition) {
-            None => false,
-            Some(families) => {
-                let parse_time = start_marker.elapsed();
-                info!("parse time: {:?}", parse_time);
-                let mut result = true;
-                for family in families {
-                    if !self.process_metric_family(timestamp_millis, &family) {
-                        result = false;
-                    }
-                }
-                let write_time = start_marker.elapsed();
-                info!("write time: {:?}", write_time - parse_time);
-                result
-            }
-        }
     }
 }

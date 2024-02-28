@@ -45,14 +45,18 @@ pub struct Sample<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub struct MetricFamily<'a> {
-    pub var: Option<&'a str>,  // TODO: this shouldn't be optional?
+    pub var: Option<&'a str>, // TODO: this shouldn't be optional?
     pub help: Option<&'a str>,
     pub r#type: SampleType,
     pub samples: Vec<Sample<'a>>,
 }
 
 impl<'a> MetricFamily<'a> {
-    fn parse(pair: Pair<'a, Rule>) -> Option<MetricFamily> {
+    fn parse(
+        instance: Option<&'a str>,
+        job: Option<&'a str>,
+        pair: Pair<'a, Rule>,
+    ) -> Option<MetricFamily<'a>> {
         debug_assert_eq!(pair.as_rule(), Rule::metricfamily);
         let mut metric_family = MetricFamily::default();
         for child in pair.into_inner() {
@@ -66,7 +70,7 @@ impl<'a> MetricFamily<'a> {
                         return None;
                     }
                 }
-                Rule::metric => match Self::parse_sample(child) {
+                Rule::metric => match Self::parse_sample(instance, job, child) {
                     Some(sample) => metric_family.samples.push(sample),
                     None => return None,
                 },
@@ -122,13 +126,17 @@ impl<'a> MetricFamily<'a> {
         true
     }
 
-    fn parse_sample(pair: Pair<'a, Rule>) -> Option<Sample> {
+    fn parse_sample(
+        instance: Option<&'a str>,
+        job: Option<&'a str>,
+        pair: Pair<'a, Rule>,
+    ) -> Option<Sample<'a>> {
         assert_eq!(pair.as_rule(), Rule::metric);
 
         let mut descriptor = pair.into_inner();
         let metric_name = descriptor.next().unwrap().as_str();
         let labels = if descriptor.peek().unwrap().as_rule() == Rule::labels {
-            parse_labels(descriptor.next().unwrap())
+            parse_labels(instance, job, descriptor.next().unwrap())
         } else {
             Vec::new()
         };
@@ -141,34 +149,54 @@ impl<'a> MetricFamily<'a> {
     }
 }
 
-fn parse_labels(pair: Pair<Rule>) -> LabelSet {
+fn parse_labels<'a>(
+    instance: Option<&'a str>,
+    job: Option<&'a str>,
+    pair: Pair<'a, Rule>,
+) -> LabelSet<'a> {
     assert_eq!(pair.as_rule(), Rule::labels);
+    let mut labels = LabelSet::new();
+    if let Some(instance) = instance {
+        labels.push(("instance", instance));
+    }
+    if let Some(job) = job {
+        labels.push(("job", job));
+    }
+    labels.extend(pair.into_inner().map(|label| {
+        let mut inner = label.into_inner();
+        let name = inner.next().unwrap().as_str();
+        let value = inner.next().unwrap().as_str();
+        for extra_pair in inner {
+            warn!("unexpected token after label: {:?}", extra_pair);
+        }
+        (name, value)
+    }));
+    labels
+}
+
+fn parse_exposition<'a>(
+    instance: Option<&'a str>,
+    job: Option<&'a str>,
+    pair: Pair<'a, Rule>,
+) -> Vec<MetricFamily<'a>> {
+    assert_eq!(pair.as_rule(), Rule::exposition);
     pair.into_inner()
-        .map(|label| {
-            let mut inner = label.into_inner();
-            let name = inner.next().unwrap().as_str();
-            let value = inner.next().unwrap().as_str();
-            for extra_pair in inner {
-                warn!("unexpected token after label: {:?}", extra_pair);
-            }
-            (name, value)
+        .flat_map(|p| match p.as_rule() {
+            Rule::metricfamily => MetricFamily::parse(instance, job, p),
+            Rule::EOI => None,
+            _ => unreachable!(),
         })
         .collect()
 }
 
-fn parse_exposition(pair: Pair<Rule>) -> Vec<MetricFamily> {
-    assert_eq!(pair.as_rule(), Rule::exposition);
-    pair.into_inner().flat_map(|p| match p.as_rule() {
-        Rule::metricfamily => MetricFamily::parse(p),
-        Rule::EOI => None,
-        _ => unreachable!()
-    }).collect()
-}
-
-pub fn parse(input: &str) -> Option<Vec<MetricFamily>> {
+pub fn parse<'a>(
+    instance: Option<&'a str>,
+    job: Option<&'a str>,
+    input: &'a str,
+) -> Option<Vec<MetricFamily<'a>>> {
     match PrometheusParser::parse(Rule::exposition, input) {
         Ok(mut iter) => {
-            let out = parse_exposition(iter.next().unwrap());
+            let out = parse_exposition(instance, job, iter.next().unwrap());
             for extra_pair in iter {
                 warn!("unexpected token after exposition: {:?}", extra_pair);
             }
