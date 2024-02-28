@@ -26,6 +26,7 @@ use tokio::net::TcpListener;
 use tokio::runtime;
 use tokio::signal;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::task;
 use tokio::time::MissedTickBehavior;
 
 pub mod fetch;
@@ -136,6 +137,8 @@ async fn writer_loop(
                         if !exporter.export(timestamp_millis, &family) {
                             error!("unable to export metric family");
                         }
+                        // Yield to the scheduler to allow other tasks to run
+                        task::yield_now().await;
                     }
                     let write_time = start_marker.elapsed();
                     info!("write time: {:?}", write_time - parse_time);
