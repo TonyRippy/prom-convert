@@ -1,4 +1,4 @@
-# Convert Prometheus Data to SQLite
+# Collect Prometheus Data into SQLite
 
 To be clear, this is a terrible idea.
 
