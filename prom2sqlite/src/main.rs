@@ -63,10 +63,10 @@ struct Args {
 
     /// The URL of a Prometheus client endpoint to scrape.
     /// If "-", then read from stdin.
-    source: String,
+    target: String,
 
     /// The path to the SQLite database file to store metrics.
-    target: String,
+    output: String,
 }
 
 impl driver::Args for Args {
@@ -91,7 +91,7 @@ impl driver::Args for Args {
     }
 
     fn target(&self) -> &str {
-        self.source.as_str()
+        self.target.as_str()
     }
 }
 
@@ -103,7 +103,7 @@ fn main() -> ExitCode {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     let writer = Box::new(
-        match TableExporter::open(&args.target, args.stanchion.as_deref()) {
+        match TableExporter::open(&args.output, args.stanchion.as_deref()) {
             Ok(writer) => writer,
             Err(err) => {
                 error!("error opening database: {}", err);

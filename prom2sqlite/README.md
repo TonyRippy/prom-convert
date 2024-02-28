@@ -18,11 +18,11 @@ separately following the directions from Stanchion project.
 ```
 Collects data from Prometheus clients and stores it locally in SQLite.
 
-Usage: prom2sqlite [OPTIONS] <SOURCE> <TARGET>
+Usage: prom2sqlite [OPTIONS] <TARGET> <OUTPUT>
 
 Arguments:
-  <SOURCE>  The URL of a Prometheus client endpoint to scrape. If "-", then read from stdin
-  <TARGET>  The path to the SQLite database file to store metrics
+  <TARGET>  The URL of a Prometheus client endpoint to scrape. If "-", then read from stdin
+  <OUTPUT>  The path to the SQLite database file to store metrics
 
 Options:
       --host <HOST>            The IP address to listen on for connections. Only needed when running as a server [default: 127.0.0.1]
@@ -43,7 +43,7 @@ it into a self contained SQLite3 database:
 
 It is possible to generate or download the Prometheus exposition format using
 other tools and pipe it into `prom2sqlite`. To do this, you will need to pass 
-in "`-`" as the source. (Like a lot of other UNIX tools.) For example:
+in "`-`" as the target. For example:
 
 ```shell
 curl -s http://localhost:9100/metrics | prom2sqlite - out.db
@@ -51,7 +51,7 @@ curl -s http://localhost:9100/metrics | prom2sqlite - out.db
 
 ### Collect from Live Process
 
-If you specify a URL as the source, then the tool will regularly scrape
+If you specify a URL as the target, then the tool will regularly scrape
 Prometheus data from that URL until the tool is terminated. You can control how
 often the process is sampled using the `--interval` flag. Example:
 
