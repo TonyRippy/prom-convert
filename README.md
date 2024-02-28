@@ -11,6 +11,11 @@ Coming soon:
 * Parquet
 * OpenTelemetry protobufs
 
+The name of the project was inspired by [minikube](https://minikube.sigs.k8s.io/docs/),
+which allows one to run a Kubernetes cluster locally. I like the idea of small
+self-contained infrastructure when you have simple needs and don't need an
+industrial-grade solution.
+
 ## Why Do This?
 
 The primary motivation is to have a lightweight and deterministic way to
