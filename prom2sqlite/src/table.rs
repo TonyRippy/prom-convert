@@ -223,7 +223,7 @@ impl TableExporter {
         metric_id: i64,
         label_set: &LabelSet,
     ) -> rusqlite::Result<i64> {
-        let mut label_value_ids = Vec::with_capacity(label_set.len() + 2);
+        let mut label_value_ids = Vec::with_capacity(label_set.len());
         for &(label, value) in label_set {
             let label_value_id = self.get_label_value_cached(label, value)?;
             label_value_ids.push(label_value_id);
