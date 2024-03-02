@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "driver",
+    "prom2parquet",
     "prom2sqlite",
 ]
 resolver = "2"

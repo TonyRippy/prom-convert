@@ -5,11 +5,12 @@ clients and store the data into a variety of self-contained formats.
 The formats supported so far are:
 
 * [SQLite3](prom2sqlite)
+* [Parquet](prom2parquet)
 
 Coming soon:
 
-* Parquet
 * OpenTelemetry protobufs
+* Possibly a new self-contained format? 
 
 The name of the project was inspired by [minikube](https://minikube.sigs.k8s.io/docs/),
 which allows one to run a Kubernetes cluster locally. I like the idea of small

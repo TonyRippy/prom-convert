@@ -288,4 +288,6 @@ impl driver::Exporter for TableExporter {
         }
         true
     }
+
+    fn close(&mut self) {}
 }

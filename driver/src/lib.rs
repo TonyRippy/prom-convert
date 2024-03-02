@@ -35,6 +35,7 @@ pub mod parse;
 
 pub trait Exporter {
     fn export(&mut self, timestamp_millis: u64, family: &parse::MetricFamily) -> bool;
+    fn close(&mut self);
 }
 
 pub trait Args {
@@ -151,6 +152,7 @@ async fn writer_loop(
             }
         }
     }
+    exporter.close();
 }
 
 async fn run_async(args: &impl Args, exporter: Box<dyn Exporter + Send>) -> ExitCode {
