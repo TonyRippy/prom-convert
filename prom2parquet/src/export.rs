@@ -15,12 +15,11 @@
 
 use std::error::Error;
 use std::fs::File;
-use std::path::Path;
 use std::sync::Arc;
 
 use arrow::array::*;
 use arrow::datatypes::{DataType, Field, Fields, Schema, TimeUnit};
-use driver::parse::{MetricFamily, Sample, SampleType};
+use driver::parse::{MetricFamily, Sample};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
