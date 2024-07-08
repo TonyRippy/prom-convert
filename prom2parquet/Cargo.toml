@@ -8,7 +8,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrow = "52.0.0"
+arrow = "52.1.0"
 clap = { version = "4", features = ["derive"] }
 driver = { path = "../driver" }
 env_logger = "0.11.3"
