@@ -11,6 +11,6 @@ edition = "2021"
 chrono = "0.4.38"
 clap = { version = "4", features = ["derive"] }
 driver = { path = "../driver" }
-env_logger = "0.11.3"
+env_logger = "0.11.5"
 log = "0.4"
 rusqlite = { version = "0.32.1", features = ["bundled", "load_extension"] }

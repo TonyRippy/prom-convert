@@ -11,6 +11,6 @@ edition = "2021"
 arrow = "52.0.0"
 clap = { version = "4", features = ["derive"] }
 driver = { path = "../driver" }
-env_logger = "0.11.3"
+env_logger = "0.11.5"
 log = "0.4"
 parquet = "52.0.0"
